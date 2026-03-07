@@ -1,0 +1,1566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pineapple Party</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #1a1a2e; }
+  canvas { display: block; }
+  #info {
+    position: absolute; top: 12px; left: 0; right: 0;
+    text-align: center; color: #ccc; font-family: system-ui, sans-serif;
+    font-size: 14px; pointer-events: none; user-select: none;
+  }
+
+  /* Right panel */
+  #panel {
+    position: absolute; top: 40px; right: 16px; width: 220px;
+    background: rgba(10, 10, 30, 0.85); border-radius: 10px;
+    padding: 16px; font-family: system-ui, sans-serif;
+    color: #ddd; font-size: 13px; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.08);
+    max-height: calc(100vh - 120px); overflow-y: auto;
+  }
+  #panel h3 {
+    margin: 0 0 12px 0; font-size: 14px; color: #fff;
+    letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  #modelToggle {
+    display: flex; gap: 4px; margin-bottom: 14px;
+  }
+  .modelBtn {
+    flex: 1; padding: 8px 0; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06);
+    color: #ccc; cursor: pointer; font-size: 18px; text-align: center;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .modelBtn:hover { background: rgba(255,255,255,0.12); }
+  .modelBtn.active { background: rgba(218,165,32,0.3); border-color: #daa520; }
+  .control { margin-bottom: 10px; }
+  .control label {
+    display: flex; justify-content: space-between; margin-bottom: 3px;
+    font-size: 12px;
+  }
+  .control label span.val { color: #daa520; font-variant-numeric: tabular-nums; }
+  .control input[type=range] {
+    width: 100%; height: 4px; -webkit-appearance: none; appearance: none;
+    background: rgba(255,255,255,0.12); border-radius: 2px; outline: none;
+  }
+  .control input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: #daa520; cursor: pointer;
+    border: 2px solid rgba(0,0,0,0.3);
+  }
+  .panelBtn {
+    width: 100%; margin-top: 6px; padding: 7px 0;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px; color: #ccc; cursor: pointer; font-size: 12px;
+    font-family: system-ui, sans-serif; letter-spacing: 0.3px;
+  }
+  .panelBtn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+
+  /* Left toolbar */
+  #toolbar {
+    position: absolute; top: 40px; left: 16px;
+    background: rgba(10, 10, 30, 0.85); border-radius: 10px;
+    padding: 10px; font-family: system-ui, sans-serif;
+    backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .toolBtn {
+    width: 44px; height: 44px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06); color: #ccc; cursor: pointer;
+    font-size: 18px; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .toolBtn:hover { background: rgba(255,255,255,0.12); }
+  .toolBtn.active { background: rgba(218,165,32,0.3); border-color: #daa520; color: #fff; }
+  #toolbar label {
+    color: #999; font-size: 10px; text-align: center; margin-top: 2px;
+  }
+  #toolbar input[type=range] {
+    width: 44px; height: 4px; -webkit-appearance: none; appearance: none;
+    background: rgba(255,255,255,0.12); border-radius: 2px; outline: none;
+  }
+  #toolbar input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 10px; height: 10px;
+    border-radius: 50%; background: #daa520; cursor: pointer;
+  }
+
+  /* Bottom timeline */
+  #timeline {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 48px;
+    background: rgba(10, 10, 30, 0.9); backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex; align-items: center; gap: 8px; padding: 0 16px;
+    font-family: system-ui, sans-serif; color: #ccc; font-size: 13px;
+    user-select: none;
+  }
+  .tlBtn {
+    width: 32px; height: 32px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06); color: #ccc; cursor: pointer;
+    font-size: 14px; display: flex; align-items: center; justify-content: center;
+  }
+  .tlBtn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+  .tlBtn.active { background: rgba(218,165,32,0.3); border-color: #daa520; }
+  #scrub {
+    flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+    background: rgba(255,255,255,0.15); border-radius: 2px; outline: none;
+  }
+  #scrub::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: #daa520; cursor: pointer;
+    border: 2px solid rgba(0,0,0,0.3);
+  }
+  #timeDisplay { font-variant-numeric: tabular-nums; min-width: 48px; text-align: right; font-size: 12px; }
+  #speedDisplay { font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; font-size: 11px; color: #daa520; }
+</style>
+</head>
+<body>
+<div id="info">Drag to rotate &middot; Scroll to zoom</div>
+
+<!-- Left toolbar -->
+<div id="toolbar">
+  <button class="toolBtn" id="toolGrab" title="Grab">&#9995;</button>
+  <button class="toolBtn" id="toolInflate" title="Inflate">&#128168;</button>
+  <button class="toolBtn" id="toolPinch" title="Pinch">&#129295;</button>
+  <button class="toolBtn" id="toolSpike" title="Spike">&#11088;</button>
+  <label>Radius</label>
+  <input type="range" id="brushRadius" min="5" max="50" value="20">
+</div>
+
+<!-- Right panel -->
+<div id="panel">
+  <div id="modelToggle">
+    <button class="modelBtn active" id="btnPineapple">&#127821;</button>
+    <button class="modelBtn" id="btnPear">&#127824;</button>
+    <button class="modelBtn" id="btnDragonfruit">&#128009;</button>
+    <button class="modelBtn" id="btnBanana">&#127820;</button>
+    <button class="modelBtn" id="btnDurian">&#129384;</button>
+    <button class="modelBtn" id="btnWatermelon">&#127817;</button>
+    <button class="modelBtn" id="btnStarfruit">&#11088;</button>
+  </div>
+  <h3 id="panelTitle">Pineapple Controls</h3>
+  <div class="control">
+    <label>Extrude <span class="val" id="extrudeVal">0</span></label>
+    <input type="range" id="extrude" min="-100" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Squeeze <span class="val" id="squeezeVal">0</span></label>
+    <input type="range" id="squeeze" min="-100" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Roll <span class="val" id="rollVal">0</span></label>
+    <input type="range" id="roll" min="-100" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Smush <span class="val" id="smushVal">0</span></label>
+    <input type="range" id="smush" min="-100" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Galumph <span class="val" id="galumphVal">0</span></label>
+    <input type="range" id="galumph" min="0" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Throb <span class="val" id="throbVal">0</span></label>
+    <input type="range" id="throb" min="0" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Wibble <span class="val" id="wibbleVal">0</span></label>
+    <input type="range" id="wibble" min="0" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Splay <span class="val" id="splayVal">0</span></label>
+    <input type="range" id="splay" min="0" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Melt <span class="val" id="meltVal">0</span></label>
+    <input type="range" id="melt" min="0" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Sulpherate <span class="val" id="sulpherateVal">0</span></label>
+    <input type="range" id="sulpherate" min="0" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Disco <span class="val" id="discoVal">0</span></label>
+    <input type="range" id="disco" min="0" max="100" value="0">
+  </div>
+  <div class="control">
+    <label>Invert <span class="val" id="invertVal">0</span></label>
+    <input type="range" id="invert" min="0" max="100" value="0">
+  </div>
+  <button class="panelBtn" id="exportBtn">Export SCAD</button>
+  <button class="panelBtn" id="resetBtn">Reset All</button>
+</div>
+
+<!-- Bottom timeline -->
+<div id="timeline">
+  <button class="tlBtn" id="tlRew" title="Rewind">&#9194;</button>
+  <button class="tlBtn" id="tlPlay" title="Play/Pause">&#9654;</button>
+  <button class="tlBtn" id="tlFF" title="Fast Forward">&#9193;</button>
+  <input type="range" id="scrub" min="0" max="6000" value="0" step="1">
+  <span id="timeDisplay">0.00s</span>
+  <span id="speedDisplay">1.0x</span>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// =====================================================
+// SCENE SETUP
+// =====================================================
+const scene = new THREE.Scene();
+const bgColor = new THREE.Color(0x1a1a2e);
+scene.background = bgColor.clone();
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 1, 1000);
+camera.position.set(80, 60, 100);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+const orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.08;
+orbitControls.target.set(0, 40, 0);
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+const dir1 = new THREE.DirectionalLight(0xffffff, 1.0);
+dir1.position.set(50, 80, 60);
+scene.add(dir1);
+const dir2 = new THREE.DirectionalLight(0x8888ff, 0.3);
+dir2.position.set(-40, 20, -30);
+scene.add(dir2);
+const discoLight = new THREE.PointLight(0xff0000, 0, 200);
+discoLight.position.set(60, 60, 0);
+scene.add(discoLight);
+
+const sulphurColor = new THREE.Color(0xeeee44);
+
+const gridHelper = new THREE.GridHelper(200, 20, 0x333355, 0x222244);
+scene.add(gridHelper);
+
+// =====================================================
+// SHARED: LEAF GEOMETRY BUILDER
+// =====================================================
+function createLeafGeo(leafW, leafTh, leafLen) {
+  const steps = 12;
+  const positions = [], normals = [], indices = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const w = (leafW / 2) * (1 - t * 0.67);
+    const th = (leafTh / 2) * (1 - t * 0.34);
+    const y = t * leafLen;
+    const curve = -t * t * 8;
+    const baseIdx = i * 4;
+    positions.push(w, y, th + curve, -w, y, th + curve, -w, y, -th + curve, w, y, -th + curve);
+    normals.push(0.5, 0, 0.5, -0.5, 0, 0.5, -0.5, 0, -0.5, 0.5, 0, -0.5);
+    if (i < steps) {
+      const n = baseIdx + 4;
+      indices.push(baseIdx, n, n+1, baseIdx, n+1, baseIdx+1);
+      indices.push(baseIdx+1, n+1, n+2, baseIdx+1, n+2, baseIdx+2);
+      indices.push(baseIdx+2, n+2, n+3, baseIdx+2, n+3, baseIdx+3);
+      indices.push(baseIdx+3, n+3, n, baseIdx+3, n, baseIdx);
+    }
+  }
+  const topBase = steps * 4;
+  indices.push(topBase, topBase+1, topBase+2, topBase, topBase+2, topBase+3);
+  indices.push(0, 2, 1, 0, 3, 2);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// =====================================================
+// BUILD PINEAPPLE MODEL
+// =====================================================
+function buildPineapple() {
+  const BH = 70, BR = 25, BS = 3.5, BROWS = 10, BPROW = 14;
+  const NL = 12, LL = 40, LW = 8, LTH = 2;
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdaa520, roughness: 0.6, metalness: 0.1 });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: 0xc8951a, roughness: 0.7, metalness: 0.05 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2e8b2e, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
+
+  const group = new THREE.Group();
+
+  // Body
+  const bodyGeo = new THREE.SphereGeometry(BR, 48, 32);
+  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.scale.set(1, BH / (2 * BR), 1);
+  body.position.y = BH / 2;
+  group.add(body);
+
+  // Bumps
+  const bumps = [];
+  const bumpGeo = new THREE.SphereGeometry(BS, 8, 6);
+  for (let row = 0; row < BROWS; row++) {
+    const rowFrac = (row + 0.5) / BROWS;
+    const zPos = -BH / 2 + rowFrac * BH;
+    const zNorm = zPos / (BH / 2);
+    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
+    if (localR <= BS) continue;
+    for (let col = 0; col < BPROW; col++) {
+      const angleOffset = (row % 2 === 0) ? 0 : (360 / BPROW / 2);
+      const angle = (col * (360 / BPROW) + angleOffset) * Math.PI / 180;
+      const bump = new THREE.Mesh(bumpGeo, bumpMat);
+      bump.position.set(localR * Math.cos(angle), zPos + BH / 2, localR * Math.sin(angle));
+      bump.scale.set(1, 1.3, 1);
+      group.add(bump);
+      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+    }
+  }
+
+  // Base
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(10, 12, 2, 32), bodyMat);
+  base.position.y = 1;
+  group.add(base);
+
+  // Leaves + crown
+  const leafGeo = createLeafGeo(LW, LTH, LL);
+  const leaves = [];
+  function addLeaf(parent, angleDeg, tiltDeg, sx, sy, sz) {
+    const leaf = new THREE.Mesh(leafGeo, leafMat);
+    leaf.rotation.order = 'YXZ';
+    leaf.rotation.y = angleDeg * Math.PI / 180;
+    leaf.rotation.x = -tiltDeg * Math.PI / 180;
+    leaf.scale.set(sx || 1, sy || 1, sz || 1);
+    parent.add(leaf);
+    leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+  }
+  const crown = new THREE.Group();
+  crown.position.y = BH - 3;
+  for (let i = 0; i < NL / 2; i++) addLeaf(crown, i * (360 / (NL / 2)), 8, 1, 1, 1);
+  for (let i = 0; i < NL; i++) addLeaf(crown, i * (360 / NL) + 15, 22, 1, 1, 1);
+  for (let i = 0; i < NL; i++) addLeaf(crown, i * (360 / NL), 40, 1.1, 0.85, 1.1);
+  group.add(crown);
+
+  return {
+    name: 'pineapple', group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: BH, bodyRadius: BR,
+    defaultCrownY: BH - 3, defaultBodyScaleY: BH / (2 * BR),
+    bumps, leaves, crown,
+    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
+    origColors: { body: new THREE.Color(0xdaa520), bump: new THREE.Color(0xc8951a), leaf: new THREE.Color(0x2e8b2e) }
+  };
+}
+
+// =====================================================
+// BUILD PEAR MODEL
+// =====================================================
+function buildPear() {
+  const BH = 65, BR = 22, BS = 1.8, BROWS = 12, BPROW = 12;
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xb5c327, roughness: 0.55, metalness: 0.05 });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x8a9420, roughness: 0.65, metalness: 0.05 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x1a5c1a, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1e, roughness: 0.8, metalness: 0.0 });
+
+  const group = new THREE.Group();
+
+  // Pear body: LatheGeometry from profile curve
+  // Profile: wide bulge at bottom, narrowing to a slender neck at top
+  const pts = [];
+  const profileSteps = 20;
+  for (let i = 0; i <= profileSteps; i++) {
+    const t = i / profileSteps; // 0 = bottom, 1 = top
+    const y = t * BH;
+    // Pear shape: combination of two bulges
+    // Bottom bulge (wide): gaussian centered at t=0.3
+    const bottom = Math.exp(-((t - 0.3) ** 2) / 0.05) * BR;
+    // Neck taper: smooth taper from wide to narrow
+    const taper = BR * 0.35 * (1 - t) * Math.sqrt(Math.max(0, t));
+    // Combine: max for smooth silhouette
+    let r = Math.max(bottom, taper);
+    // Ensure tip goes to 0
+    if (t > 0.85) r *= (1 - t) / 0.15;
+    if (t < 0.03) r *= t / 0.03;
+    pts.push(new THREE.Vector2(Math.max(r, 0), y));
+  }
+
+  const bodyGeo = new THREE.LatheGeometry(pts, 48);
+  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  group.add(body);
+
+  // Sample the profile to get radius at a given height
+  function profileRadius(yVal) {
+    const t = Math.max(0, Math.min(1, yVal / BH));
+    const bottom = Math.exp(-((t - 0.3) ** 2) / 0.05) * BR;
+    const taper = BR * 0.35 * (1 - t) * Math.sqrt(Math.max(0, t));
+    let r = Math.max(bottom, taper);
+    if (t > 0.85) r *= (1 - t) / 0.15;
+    if (t < 0.03) r *= t / 0.03;
+    return Math.max(r, 0);
+  }
+
+  // Bumps (speckles)
+  const bumps = [];
+  const bumpGeo = new THREE.SphereGeometry(BS, 6, 4);
+  for (let row = 0; row < BROWS; row++) {
+    const rowFrac = (row + 0.5) / BROWS;
+    const yPos = rowFrac * BH;
+    const localR = profileRadius(yPos);
+    if (localR <= BS * 1.5) continue;
+    for (let col = 0; col < BPROW; col++) {
+      const angleOffset = (row % 2 === 0) ? 0 : (360 / BPROW / 2);
+      const angle = (col * (360 / BPROW) + angleOffset) * Math.PI / 180;
+      const bump = new THREE.Mesh(bumpGeo, bumpMat);
+      bump.position.set(localR * Math.cos(angle), yPos, localR * Math.sin(angle));
+      bump.scale.set(1, 1, 1);
+      group.add(bump);
+      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+    }
+  }
+
+  // Base
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(8, 10, 2, 32), bodyMat);
+  base.position.y = 1;
+  group.add(base);
+
+  // Stem
+  const stemGeo = new THREE.CylinderGeometry(0.8, 1.2, 8, 8);
+  const stem = new THREE.Mesh(stemGeo, stemMat);
+  stem.position.y = BH + 2;
+  stem.rotation.z = 0.15; // slight tilt
+  group.add(stem);
+
+  // Leaves: small crown with 2 leaves
+  const leafGeo = createLeafGeo(5, 1.5, 18);
+  const leaves = [];
+  const crown = new THREE.Group();
+  crown.position.y = BH - 1;
+
+  function addLeaf(angleDeg, tiltDeg, sx, sy, sz) {
+    const leaf = new THREE.Mesh(leafGeo, leafMat);
+    leaf.rotation.order = 'YXZ';
+    leaf.rotation.y = angleDeg * Math.PI / 180;
+    leaf.rotation.x = -tiltDeg * Math.PI / 180;
+    leaf.scale.set(sx || 1, sy || 1, sz || 1);
+    crown.add(leaf);
+    leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+  }
+  addLeaf(30, 35, 1, 1, 1);
+  addLeaf(210, 40, 0.8, 0.9, 0.8);
+  group.add(crown);
+
+  return {
+    name: 'pear', group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: BH, bodyRadius: BR,
+    defaultCrownY: BH - 1, defaultBodyScaleY: 1,
+    bumps, leaves, crown,
+    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
+    origColors: { body: new THREE.Color(0xb5c327), bump: new THREE.Color(0x8a9420), leaf: new THREE.Color(0x1a5c1a) }
+  };
+}
+
+// =====================================================
+// BUILD DRAGONFRUIT MODEL
+// =====================================================
+function buildDragonfruit() {
+  const BH = 60, BR = 22, BROWS = 8, BPROW = 10;
+
+  // Hot pink body, green-tipped scale leaves, tiny pink bumps
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdd1177, roughness: 0.45, metalness: 0.05 });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: 0xee3388, roughness: 0.5, metalness: 0.05 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x44bb44, roughness: 0.4, metalness: 0.0, side: THREE.DoubleSide });
+
+  const group = new THREE.Group();
+
+  // Body: elongated egg shape (scaled sphere, slightly taller than wide)
+  const bodyGeo = new THREE.SphereGeometry(BR, 48, 32);
+  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.scale.set(1, BH / (2 * BR), 1);
+  body.position.y = BH / 2;
+  group.add(body);
+
+  // Bumps: small pink nubs between the scale leaves
+  const bumps = [];
+  const bumpGeo = new THREE.SphereGeometry(1.5, 6, 4);
+  for (let row = 0; row < BROWS; row++) {
+    const rowFrac = (row + 0.5) / BROWS;
+    const zPos = -BH / 2 + rowFrac * BH;
+    const zNorm = zPos / (BH / 2);
+    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
+    if (localR <= 3) continue;
+    for (let col = 0; col < BPROW; col++) {
+      const angleOffset = (row % 2 === 0) ? 0 : (360 / BPROW / 2);
+      const angle = (col * (360 / BPROW) + angleOffset) * Math.PI / 180;
+      const bump = new THREE.Mesh(bumpGeo, bumpMat);
+      bump.position.set(localR * Math.cos(angle), zPos + BH / 2, localR * Math.sin(angle));
+      bump.scale.set(1, 1, 1);
+      group.add(bump);
+      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+    }
+  }
+
+  // Base
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(9, 11, 2, 32), bodyMat);
+  base.position.y = 1;
+  group.add(base);
+
+  // Scale leaves: fleshy triangular protrusions covering the body
+  // These are the signature dragonfruit feature - green-tipped scales
+  const scaleGeo = createLeafGeo(6, 2, 14);
+  const leaves = [];
+  const crown = new THREE.Group();
+  crown.position.y = BH / 2; // center of body
+
+  const scaleRows = 6;
+  const scalesPerRow = 8;
+  for (let row = 0; row < scaleRows; row++) {
+    const rowFrac = (row + 0.5) / scaleRows;
+    const zPos = -BH / 2 + rowFrac * BH;
+    const zNorm = zPos / (BH / 2);
+    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
+    if (localR <= 4) continue;
+
+    for (let col = 0; col < scalesPerRow; col++) {
+      const angleOffset = (row % 2 === 0) ? 0 : (360 / scalesPerRow / 2);
+      const angleDeg = col * (360 / scalesPerRow) + angleOffset;
+      const angleRad = angleDeg * Math.PI / 180;
+
+      const leaf = new THREE.Mesh(scaleGeo, leafMat);
+      // Position on the body surface
+      leaf.position.set(
+        localR * Math.cos(angleRad),
+        zPos, // relative to crown center at BH/2
+        localR * Math.sin(angleRad)
+      );
+      // Orient: point outward radially, tilted upward
+      leaf.rotation.order = 'YXZ';
+      leaf.rotation.y = angleDeg * Math.PI / 180;
+      const tiltDeg = 55 + row * 3; // more upright near top
+      leaf.rotation.x = -tiltDeg * Math.PI / 180;
+      leaf.scale.set(0.6, 0.6 + rowFrac * 0.3, 0.6);
+      crown.add(leaf);
+      leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+    }
+  }
+
+  // Top tuft: a few upright leaves at the very top
+  for (let i = 0; i < 5; i++) {
+    const angleDeg = i * 72;
+    const leaf = new THREE.Mesh(scaleGeo, leafMat);
+    leaf.position.set(0, BH / 2 - 5, 0);
+    leaf.rotation.order = 'YXZ';
+    leaf.rotation.y = angleDeg * Math.PI / 180;
+    leaf.rotation.x = -15 * Math.PI / 180;
+    leaf.scale.set(0.5, 0.7, 0.5);
+    crown.add(leaf);
+    leaves.push({ mesh: leaf, origTiltRad: -15 * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+  }
+
+  group.add(crown);
+
+  return {
+    name: 'dragonfruit', group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: BH, bodyRadius: BR,
+    defaultCrownY: BH / 2, defaultBodyScaleY: BH / (2 * BR),
+    bumps, leaves, crown,
+    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
+    origColors: { body: new THREE.Color(0xdd1177), bump: new THREE.Color(0xee3388), leaf: new THREE.Color(0x44bb44) }
+  };
+}
+
+// =====================================================
+// BUILD BANANA MODEL
+// =====================================================
+function buildBanana() {
+  const BH = 80, BR = 12;
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffe135, roughness: 0.4, metalness: 0.05 });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: 0xd4b82a, roughness: 0.5, metalness: 0.05 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide });
+
+  const group = new THREE.Group();
+
+  // Banana body: curved cylinder using LatheGeometry with a banana-shaped profile
+  // We'll build a tube along a curved path
+  const segs = 40;
+  const curvePoints = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const y = t * BH;
+    // Curve: parabolic arc that gives banana its bend
+    const bend = Math.sin(t * Math.PI) * 18;
+    curvePoints.push(new THREE.Vector3(bend, y, 0));
+  }
+  const curve = new THREE.CatmullRomCurve3(curvePoints);
+  const bodyGeo = new THREE.TubeGeometry(curve, 48, BR, 16, false);
+  // Taper the tube: scale vertices based on position along curve
+  const posAttr = bodyGeo.attributes.position;
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    // Find closest t on curve
+    const t = Math.max(0, Math.min(1, y / BH));
+    // Taper: thicker in middle, thin at ends
+    const taper = Math.sin(t * Math.PI) * 0.7 + 0.3;
+    // Slightly flatten cross-section for banana ridge effect
+    const pt = curve.getPoint(t);
+    const dx = x - pt.x, dz = z - pt.z;
+    posAttr.setX(i, pt.x + dx * taper);
+    posAttr.setZ(i, pt.z + dz * taper * 0.85);
+  }
+  bodyGeo.computeVertexNormals();
+  const bodyOrigPositions = new Float32Array(posAttr.array);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  group.add(body);
+
+  // Brown spots/speckles as bumps
+  const bumps = [];
+  const bumpGeo = new THREE.SphereGeometry(1.2, 6, 4);
+  for (let row = 0; row < 10; row++) {
+    const rowT = (row + 0.5) / 10;
+    const pt = curve.getPoint(rowT);
+    const taper = Math.sin(rowT * Math.PI) * 0.7 + 0.3;
+    const localR = BR * taper;
+    if (localR <= 3) continue;
+    for (let col = 0; col < 8; col++) {
+      const angle = (col * 45 + (row % 2) * 22.5) * Math.PI / 180;
+      const bump = new THREE.Mesh(bumpGeo, bumpMat);
+      bump.position.set(
+        pt.x + Math.cos(angle) * localR,
+        pt.y,
+        pt.z + Math.sin(angle) * localR * 0.85
+      );
+      group.add(bump);
+      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+    }
+  }
+
+  // Base
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(6, 8, 2, 32), bodyMat);
+  base.position.y = 1;
+  group.add(base);
+
+  // Stem at top and bottom nub
+  const leaves = [];
+  const crown = new THREE.Group();
+  crown.position.y = BH;
+  const stemGeo = new THREE.CylinderGeometry(1.5, 2.5, 6, 8);
+  const stem = new THREE.Mesh(stemGeo, leafMat);
+  stem.position.set(curvePoints[segs].x - curvePoints[0].x, 3, 0);
+  crown.add(stem);
+  leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
+
+  // Bottom nub
+  const nubGeo = new THREE.SphereGeometry(2, 8, 6);
+  const nub = new THREE.Mesh(nubGeo, leafMat);
+  nub.position.set(0, -BH, 0);
+  crown.add(nub);
+  leaves.push({ mesh: nub, origTiltRad: 0, angleDeg: 180, origScale: nub.scale.clone() });
+
+  group.add(crown);
+
+  return {
+    name: 'banana', group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: BH, bodyRadius: BR,
+    defaultCrownY: BH, defaultBodyScaleY: 1,
+    bumps, leaves, crown,
+    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
+    origColors: { body: new THREE.Color(0xffe135), bump: new THREE.Color(0xd4b82a), leaf: new THREE.Color(0x8b6914) }
+  };
+}
+
+// =====================================================
+// BUILD DURIAN MODEL
+// =====================================================
+function buildDurian() {
+  const BH = 65, BR = 28;
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8b9a3c, roughness: 0.7, metalness: 0.05 });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x6b7a2c, roughness: 0.8, metalness: 0.1 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x5a6b22, roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide });
+
+  const group = new THREE.Group();
+
+  // Body: chunky ovoid
+  const bodyGeo = new THREE.SphereGeometry(BR, 48, 32);
+  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.scale.set(1, BH / (2 * BR), 1);
+  body.position.y = BH / 2;
+  group.add(body);
+
+  // Spikes! Lots of conical spikes covering the body
+  const bumps = [];
+  const spikeGeo = new THREE.ConeGeometry(2.5, 8, 6);
+  spikeGeo.translate(0, 4, 0); // pivot at base
+  const SROWS = 12, SPROW = 14;
+  for (let row = 0; row < SROWS; row++) {
+    const rowFrac = (row + 0.5) / SROWS;
+    const zPos = -BH / 2 + rowFrac * BH;
+    const zNorm = zPos / (BH / 2);
+    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
+    if (localR <= 4) continue;
+    for (let col = 0; col < SPROW; col++) {
+      const angleOffset = (row % 2 === 0) ? 0 : (360 / SPROW / 2);
+      const angle = (col * (360 / SPROW) + angleOffset) * Math.PI / 180;
+      const spike = new THREE.Mesh(spikeGeo, bumpMat);
+      const sx = localR * Math.cos(angle);
+      const sz = localR * Math.sin(angle);
+      const sy = zPos + BH / 2;
+      spike.position.set(sx, sy, sz);
+      // Orient spike outward from body center
+      const dir = new THREE.Vector3(sx, sy - BH / 2, sz).normalize();
+      spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      spike.scale.set(1, 0.8 + Math.random() * 0.4, 1);
+      group.add(spike);
+      bumps.push({ mesh: spike, origPos: spike.position.clone(), origScale: spike.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+    }
+  }
+
+  // Base
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(10, 12, 2, 32), bodyMat);
+  base.position.y = 1;
+  group.add(base);
+
+  // Small stem at top
+  const leaves = [];
+  const crown = new THREE.Group();
+  crown.position.y = BH - 2;
+  const stemGeo = new THREE.CylinderGeometry(3, 5, 8, 8);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x7a6b3c, roughness: 0.8 });
+  const stem = new THREE.Mesh(stemGeo, stemMat);
+  stem.position.y = 4;
+  crown.add(stem);
+  leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
+
+  // A few small leaves at the stem
+  const leafGeo = createLeafGeo(5, 1.5, 12);
+  for (let i = 0; i < 4; i++) {
+    const leaf = new THREE.Mesh(leafGeo, leafMat);
+    leaf.rotation.order = 'YXZ';
+    leaf.rotation.y = (i * 90) * Math.PI / 180;
+    leaf.rotation.x = -50 * Math.PI / 180;
+    leaf.position.y = 6;
+    leaf.scale.set(0.6, 0.5, 0.6);
+    crown.add(leaf);
+    leaves.push({ mesh: leaf, origTiltRad: -50 * Math.PI / 180, angleDeg: i * 90, origScale: leaf.scale.clone() });
+  }
+  group.add(crown);
+
+  return {
+    name: 'durian', group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: BH, bodyRadius: BR,
+    defaultCrownY: BH - 2, defaultBodyScaleY: BH / (2 * BR),
+    bumps, leaves, crown,
+    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
+    origColors: { body: new THREE.Color(0x8b9a3c), bump: new THREE.Color(0x6b7a2c), leaf: new THREE.Color(0x5a6b22) }
+  };
+}
+
+// =====================================================
+// BUILD WATERMELON WEDGE MODEL
+// =====================================================
+function buildWatermelon() {
+  const BH = 50, BR = 30;
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff3355, roughness: 0.4, metalness: 0.0 });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.3, metalness: 0.2 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2d8a2d, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
+
+  const group = new THREE.Group();
+  const sliceDepth = 12;
+
+  // Half-disc watermelon slice using ExtrudeGeometry
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.absarc(0, 0, BR, 0, Math.PI, false);
+  shape.lineTo(0, 0);
+
+  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: sliceDepth, bevelEnabled: false });
+  // Reposition so it sits upright: the shape is in XY, extrude along Z
+  // Rotate to stand upright with flat face visible
+  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = BR; // lift so bottom of semicircle sits on ground
+  group.add(body);
+
+  // Green rind: a slightly larger semicircular strip on the curved edge
+  const rindShape = new THREE.Shape();
+  const rindR = BR + 3;
+  rindShape.moveTo(BR, 0);
+  rindShape.absarc(0, 0, rindR, 0, Math.PI, false);
+  rindShape.lineTo(-BR, 0);
+  rindShape.absarc(0, 0, BR, Math.PI, 0, true);
+  const rindGeo = new THREE.ExtrudeGeometry(rindShape, { depth: sliceDepth, bevelEnabled: false });
+  const rind = new THREE.Mesh(rindGeo, leafMat);
+  rind.position.y = BR;
+  group.add(rind);
+
+  // Seeds scattered on the front flat face
+  const bumps = [];
+  const seedGeo = new THREE.SphereGeometry(1.2, 6, 4);
+  for (let i = 0; i < 20; i++) {
+    // Random positions within semicircle, biased toward center
+    const angle = (0.15 + Math.random() * 0.7) * Math.PI;
+    const r = (0.25 + Math.random() * 0.5) * BR;
+    const x = r * Math.cos(angle);
+    const y = r * Math.sin(angle);
+    const seed = new THREE.Mesh(seedGeo, bumpMat);
+    seed.position.set(x, y + BR, -0.5);
+    seed.scale.set(0.7, 1.2, 0.4);
+    seed.rotation.z = angle - Math.PI / 2;
+    group.add(seed);
+    bumps.push({ mesh: seed, origPos: seed.position.clone(), origScale: seed.scale.clone(), row: Math.floor(i / 4), col: i % 4, deformOffset: new THREE.Vector3() });
+  }
+
+  // Base
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(10, 12, 2, 32), leafMat);
+  base.position.y = 1;
+  group.add(base);
+
+  const leaves = [];
+  const crown = new THREE.Group();
+  crown.position.y = BR * 2;
+  group.add(crown);
+
+  return {
+    name: 'watermelon', group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: BR * 2, bodyRadius: BR,
+    defaultCrownY: BR * 2, defaultBodyScaleY: 1,
+    bumps, leaves, crown,
+    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
+    origColors: { body: new THREE.Color(0xff3355), bump: new THREE.Color(0x222222), leaf: new THREE.Color(0x2d8a2d) }
+  };
+}
+
+// =====================================================
+// BUILD STARFRUIT MODEL
+// =====================================================
+function buildStarfruit() {
+  const BH = 60, BR = 18;
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xc8d82e, roughness: 0.35, metalness: 0.05 });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x9aaa20, roughness: 0.5, metalness: 0.05 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x7a8a18, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
+
+  const group = new THREE.Group();
+
+  // Starfruit: 5-pointed star cross-section extruded vertically with taper
+  // Build using LatheGeometry-like approach but with star profile
+  const starPoints = 5;
+  const aSegs = starPoints * 8; // angular resolution
+  const hSegs = 24;
+  const positions = [], normals = [], indices = [];
+
+  function starRadius(angle) {
+    // 5-pointed star profile
+    const a5 = ((angle % (Math.PI * 2 / starPoints)) / (Math.PI * 2 / starPoints));
+    // Smooth star shape using cosine
+    const peak = Math.cos(a5 * Math.PI * 2 - Math.PI) * 0.5 + 0.5;
+    return BR * (0.55 + peak * 0.45);
+  }
+
+  for (let h = 0; h <= hSegs; h++) {
+    const t = h / hSegs;
+    const y = t * BH;
+    // Taper: thinner at top and bottom
+    const taper = Math.sin(t * Math.PI) * 0.75 + 0.25;
+    for (let a = 0; a <= aSegs; a++) {
+      const angle = (a / aSegs) * Math.PI * 2;
+      const r = starRadius(angle) * taper;
+      positions.push(r * Math.cos(angle), y, r * Math.sin(angle));
+      // Approximate normal: outward direction
+      const nx = Math.cos(angle), nz = Math.sin(angle);
+      normals.push(nx, 0, nz);
+    }
+  }
+  for (let h = 0; h < hSegs; h++) {
+    for (let a = 0; a < aSegs; a++) {
+      const i0 = h * (aSegs + 1) + a;
+      const i1 = i0 + 1;
+      const i2 = i0 + (aSegs + 1);
+      const i3 = i2 + 1;
+      indices.push(i0, i2, i1, i1, i2, i3);
+    }
+  }
+
+  const bodyGeo = new THREE.BufferGeometry();
+  bodyGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  bodyGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  bodyGeo.setIndex(indices);
+  bodyGeo.computeVertexNormals();
+
+  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  group.add(body);
+
+  // Ridges along the star points as bumps (subtle highlights)
+  const bumps = [];
+  const ridgeGeo = new THREE.SphereGeometry(1.5, 6, 4);
+  for (let row = 0; row < 8; row++) {
+    const t = (row + 0.5) / 8;
+    const y = t * BH;
+    const taper = Math.sin(t * Math.PI) * 0.75 + 0.25;
+    for (let p = 0; p < starPoints; p++) {
+      const angle = (p / starPoints) * Math.PI * 2;
+      const r = BR * taper;
+      const bump = new THREE.Mesh(ridgeGeo, bumpMat);
+      bump.position.set(r * Math.cos(angle), y, r * Math.sin(angle));
+      bump.scale.set(1.2, 1.2, 0.6);
+      group.add(bump);
+      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col: p, deformOffset: new THREE.Vector3() });
+    }
+  }
+
+  // Base
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(6, 8, 2, 32), bodyMat);
+  base.position.y = 1;
+  group.add(base);
+
+  // Small stem at top
+  const leaves = [];
+  const crown = new THREE.Group();
+  crown.position.y = BH - 2;
+  const stemGeo = new THREE.CylinderGeometry(0.8, 1.5, 5, 8);
+  const stem = new THREE.Mesh(stemGeo, leafMat);
+  stem.position.y = 2;
+  crown.add(stem);
+  leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
+
+  // Tiny leaf
+  const leafGeo = createLeafGeo(4, 1, 10);
+  const leaf = new THREE.Mesh(leafGeo, leafMat);
+  leaf.rotation.order = 'YXZ';
+  leaf.rotation.y = 0.3;
+  leaf.rotation.x = -40 * Math.PI / 180;
+  leaf.position.y = 3;
+  leaf.scale.set(0.5, 0.5, 0.5);
+  crown.add(leaf);
+  leaves.push({ mesh: leaf, origTiltRad: -40 * Math.PI / 180, angleDeg: 17, origScale: leaf.scale.clone() });
+  group.add(crown);
+
+  return {
+    name: 'starfruit', group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: BH, bodyRadius: BR,
+    defaultCrownY: BH - 2, defaultBodyScaleY: 1,
+    bumps, leaves, crown,
+    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
+    origColors: { body: new THREE.Color(0xc8d82e), bump: new THREE.Color(0x9aaa20), leaf: new THREE.Color(0x7a8a18) }
+  };
+}
+
+// =====================================================
+// MODEL MANAGEMENT
+// =====================================================
+const pineappleModel = buildPineapple();
+const pearModel = buildPear();
+const dragonfruitModel = buildDragonfruit();
+const bananaModel = buildBanana();
+const durianModel = buildDurian();
+const watermelonModel = buildWatermelon();
+const starfruitModel = buildStarfruit();
+
+const allModelsList = [pineappleModel, pearModel, dragonfruitModel, bananaModel, durianModel, watermelonModel, starfruitModel];
+for (const mdl of allModelsList) {
+  scene.add(mdl.group);
+  mdl.group.visible = false;
+}
+pineappleModel.group.visible = true;
+
+const allModels = {};
+const modelBtnIds = {};
+for (const mdl of allModelsList) {
+  allModels[mdl.name] = mdl;
+  modelBtnIds[mdl.name] = 'btn' + mdl.name.charAt(0).toUpperCase() + mdl.name.slice(1);
+}
+let activeModel = pineappleModel;
+
+function switchModel(model) {
+  activeModel.group.visible = false;
+  activeModel = model;
+  activeModel.group.visible = true;
+  document.getElementById('panelTitle').textContent = model.name.charAt(0).toUpperCase() + model.name.slice(1) + ' Controls';
+  for (const mdl of allModelsList) {
+    const btnId = modelBtnIds[mdl.name];
+    document.getElementById(btnId).classList.toggle('active', mdl === model);
+  }
+}
+
+for (const mdl of allModelsList) {
+  const btnId = modelBtnIds[mdl.name];
+  document.getElementById(btnId).addEventListener('click', () => switchModel(mdl));
+}
+
+// =====================================================
+// CONTROLS STATE
+// =====================================================
+const state = {
+  extrude: 0, squeeze: 0, roll: 0, smush: 0, galumph: 0,
+  throb: 0, wibble: 0, splay: 0, melt: 0, sulpherate: 0,
+  disco: 0, invert: 0
+};
+
+for (const key of Object.keys(state)) {
+  const slider = document.getElementById(key);
+  const valSpan = document.getElementById(key + 'Val');
+  slider.addEventListener('input', () => {
+    state[key] = Number(slider.value);
+    valSpan.textContent = slider.value;
+  });
+}
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  for (const key of Object.keys(state)) {
+    state[key] = 0;
+    document.getElementById(key).value = 0;
+    document.getElementById(key + 'Val').textContent = '0';
+  }
+  for (const b of activeModel.bumps) b.deformOffset.set(0, 0, 0);
+});
+
+// =====================================================
+// TIMELINE
+// =====================================================
+let animTime = 0;
+let playing = true;
+let playbackSpeed = 1;
+const MAX_TIME = 60;
+const scrubEl = document.getElementById('scrub');
+const timeDisp = document.getElementById('timeDisplay');
+const speedDisp = document.getElementById('speedDisplay');
+const tlPlay = document.getElementById('tlPlay');
+
+tlPlay.addEventListener('click', () => {
+  playing = !playing;
+  tlPlay.innerHTML = playing ? '&#9646;&#9646;' : '&#9654;';
+  tlPlay.classList.toggle('active', !playing);
+});
+
+document.getElementById('tlRew').addEventListener('click', () => {
+  if (playbackSpeed > -4) {
+    playbackSpeed = playbackSpeed <= 0 ? playbackSpeed - 1 : -1;
+    if (playbackSpeed < -4) playbackSpeed = -4;
+  }
+  speedDisp.textContent = playbackSpeed.toFixed(1) + 'x';
+});
+
+document.getElementById('tlFF').addEventListener('click', () => {
+  if (playbackSpeed < 4) {
+    playbackSpeed = playbackSpeed >= 0 ? playbackSpeed + 1 : 1;
+    if (playbackSpeed > 4) playbackSpeed = 4;
+  }
+  speedDisp.textContent = playbackSpeed.toFixed(1) + 'x';
+});
+
+let scrubbing = false;
+scrubEl.addEventListener('mousedown', () => { scrubbing = true; });
+scrubEl.addEventListener('input', () => { animTime = Number(scrubEl.value) / 100; });
+addEventListener('mouseup', () => { scrubbing = false; });
+
+// =====================================================
+// DEFORMATION TOOLS
+// =====================================================
+let activeTool = null;
+const toolBtns = { toolGrab: 'grab', toolInflate: 'inflate', toolPinch: 'pinch', toolSpike: 'spike' };
+
+for (const [id, tool] of Object.entries(toolBtns)) {
+  document.getElementById(id).addEventListener('click', () => {
+    if (activeTool === tool) {
+      activeTool = null;
+      document.getElementById(id).classList.remove('active');
+      orbitControls.enabled = true;
+    } else {
+      if (activeTool) for (const tid of Object.keys(toolBtns)) document.getElementById(tid).classList.remove('active');
+      activeTool = tool;
+      document.getElementById(id).classList.add('active');
+    }
+  });
+}
+
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && activeTool) {
+    activeTool = null;
+    for (const tid of Object.keys(toolBtns)) document.getElementById(tid).classList.remove('active');
+    orbitControls.enabled = true;
+  }
+});
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let isDragging = false;
+let grabbedBump = null;
+let dragPlane = new THREE.Plane();
+let dragOffset = new THREE.Vector3();
+
+function getBrushRadius() { return Number(document.getElementById('brushRadius').value); }
+function screenToMouse(e) {
+  mouse.x = (e.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+}
+
+function findClosestBump(point) {
+  let closest = null, minDist = Infinity;
+  for (const b of activeModel.bumps) {
+    const wp = new THREE.Vector3();
+    b.mesh.getWorldPosition(wp);
+    const d = wp.distanceTo(point);
+    if (d < minDist) { minDist = d; closest = b; }
+  }
+  return closest;
+}
+
+function applyAreaEffect(centerWorld, tool) {
+  const radius = getBrushRadius();
+  const bodyCenter = new THREE.Vector3(0, activeModel.bodyHeight / 2, 0);
+  activeModel.group.localToWorld(bodyCenter);
+  for (const b of activeModel.bumps) {
+    const wp = new THREE.Vector3();
+    b.mesh.getWorldPosition(wp);
+    const dist = wp.distanceTo(centerWorld);
+    if (dist > radius) continue;
+    const falloff = 1 - dist / radius;
+    const strength = falloff * falloff * 2;
+    const radial = wp.clone().sub(bodyCenter).normalize();
+    if (tool === 'inflate') b.deformOffset.add(radial.multiplyScalar(strength));
+    else if (tool === 'pinch') b.deformOffset.add(radial.multiplyScalar(-strength));
+  }
+}
+
+renderer.domElement.addEventListener('mousedown', (e) => {
+  if (!activeTool || e.target !== renderer.domElement) return;
+  screenToMouse(e);
+  raycaster.setFromCamera(mouse, camera);
+  const meshes = activeModel.bumps.map(b => b.mesh);
+  meshes.push(activeModel.body);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length === 0) return;
+  const hitPoint = hits[0].point;
+
+  if (activeTool === 'grab') {
+    orbitControls.enabled = false;
+    isDragging = true;
+    grabbedBump = findClosestBump(hitPoint);
+    const camDir = camera.getWorldDirection(new THREE.Vector3());
+    dragPlane.setFromNormalAndCoplanarPoint(camDir, hitPoint);
+    const intersect = new THREE.Vector3();
+    raycaster.ray.intersectPlane(dragPlane, intersect);
+    const wp = new THREE.Vector3();
+    grabbedBump.mesh.getWorldPosition(wp);
+    dragOffset.copy(wp).sub(intersect);
+  } else if (activeTool === 'inflate' || activeTool === 'pinch') {
+    orbitControls.enabled = false;
+    isDragging = true;
+    applyAreaEffect(hitPoint, activeTool);
+  } else if (activeTool === 'spike') {
+    const closest = findClosestBump(hitPoint);
+    if (closest) {
+      const bc = new THREE.Vector3(0, activeModel.bodyHeight / 2, 0);
+      const radial = closest.origPos.clone().add(closest.deformOffset).sub(bc).normalize();
+      closest.deformOffset.add(radial.multiplyScalar(8));
+    }
+  }
+});
+
+renderer.domElement.addEventListener('mousemove', (e) => {
+  if (!isDragging || !activeTool) return;
+  screenToMouse(e);
+  raycaster.setFromCamera(mouse, camera);
+  if (activeTool === 'grab' && grabbedBump) {
+    const intersect = new THREE.Vector3();
+    raycaster.ray.intersectPlane(dragPlane, intersect);
+    if (intersect) {
+      intersect.add(dragOffset);
+      const local = activeModel.group.worldToLocal(intersect);
+      grabbedBump.deformOffset.copy(local.sub(grabbedBump.origPos));
+    }
+  } else if (activeTool === 'inflate' || activeTool === 'pinch') {
+    const meshes = activeModel.bumps.map(b => b.mesh);
+    meshes.push(activeModel.body);
+    const hits = raycaster.intersectObjects(meshes, false);
+    if (hits.length > 0) applyAreaEffect(hits[0].point, activeTool);
+  }
+});
+
+addEventListener('mouseup', () => {
+  if (isDragging) { isDragging = false; grabbedBump = null; if (activeTool) orbitControls.enabled = false; }
+});
+
+// =====================================================
+// SCAD EXPORT
+// =====================================================
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const m = activeModel;
+  const BH = m.bodyHeight, BR = m.bodyRadius;
+  const ex = state.extrude, sq = state.squeeze, rl = state.roll, sm = state.smush;
+  const extS = 1 + ex / 100, sqS = 1 - sq * 0.6 / 100;
+  const smY = 1 - sm * 0.7 / 100, smXZ = 1 + sm * 0.4 / 100;
+  const scaleX = sqS * smXZ, scaleY = extS * smY, scaleZ = sqS * smXZ;
+  const rollDeg = (rl / 100) * 180;
+
+  let scad = `// Exported ${m.name} - generated by Pineapple Party\n`;
+  const sliderStr = Object.entries(state).map(([k, v]) => `${k}=${v}`).join(', ');
+  scad += `// Sliders: ${sliderStr}\n`;
+  scad += `// Time: ${animTime.toFixed(2)}s\n\n$fn = 64;\n\n`;
+  scad += `rotate([0, 0, ${rollDeg.toFixed(2)}])\nscale([${scaleX.toFixed(4)}, ${scaleY.toFixed(4)}, ${scaleZ.toFixed(4)}]) {\n`;
+
+  // --- Helper: color as SCAD RGB from Three.js hex ---
+  function scadColor(hex) {
+    const r = ((hex >> 16) & 0xff) / 255;
+    const g = ((hex >> 8) & 0xff) / 255;
+    const b = (hex & 0xff) / 255;
+    return `[${r.toFixed(3)}, ${g.toFixed(3)}, ${b.toFixed(3)}]`;
+  }
+
+  // --- Body: export current mesh as polyhedron (captures all deformations) ---
+  // OpenSCAD uses Z-up, Three.js uses Y-up. Map: SCAD x=Three x, SCAD y=Three z, SCAD z=Three y
+  const bodyColor = scadColor(m.origColors.body.getHex());
+  const posArr = m.bodyGeo.attributes.position.array;
+  const idxArr = m.bodyGeo.index ? m.bodyGeo.index.array : null;
+  const numVerts = posArr.length / 3;
+
+  scad += `  // Body (${numVerts} vertices)\n  color(${bodyColor})\n  polyhedron(\n    points=[\n`;
+  for (let i = 0; i < posArr.length; i += 3) {
+    const comma = (i + 3 < posArr.length) ? ',' : '';
+    // Swap Y/Z for SCAD Z-up
+    scad += `      [${posArr[i].toFixed(3)}, ${posArr[i+2].toFixed(3)}, ${posArr[i+1].toFixed(3)}]${comma}\n`;
+  }
+  // Reverse face winding: swapping Y/Z flips handedness, so reverse triangle order
+  scad += `    ],\n    faces=[\n`;
+  if (idxArr) {
+    for (let i = 0; i < idxArr.length; i += 3) {
+      const comma = (i + 3 < idxArr.length) ? ',' : '';
+      scad += `      [${idxArr[i]}, ${idxArr[i+2]}, ${idxArr[i+1]}]${comma}\n`;
+    }
+  } else {
+    for (let i = 0; i < numVerts; i += 3) {
+      const comma = (i + 3 < numVerts) ? ',' : '';
+      scad += `      [${i}, ${i+2}, ${i+1}]${comma}\n`;
+    }
+  }
+  scad += `    ]\n  );\n\n`;
+
+  // Watermelon rind (extra body part)
+  if (m.name === 'watermelon') {
+    const leafColor = scadColor(m.origColors.leaf.getHex());
+    scad += `  // Rind\n  color(${leafColor})\n  translate([0, 0, ${BR}])\n  linear_extrude(height = 12)\n`;
+    scad += `  difference() {\n    difference() { circle(r = ${BR + 3}, $fn = 64); circle(r = ${BR}, $fn = 64); }\n`;
+    scad += `    translate([0, -${BR + 3}, 0]) square(${(BR + 3) * 2}, center = true);\n  }\n\n`;
+  }
+
+  // Starfruit needs the star module
+  if (m.name === 'starfruit') {
+    scad = scad.replace('$fn = 64;\n\n', '$fn = 64;\n\nmodule star(outer, inner, n) {\n  polygon([for (i = [0:2*n-1]) let(r = i % 2 == 0 ? outer : inner, a = i * 180/n) [r*cos(a), r*sin(a)]]);\n}\n\n');
+  }
+
+  // --- Bumps: read actual rendered positions & scales (captures all slider + deform effects) ---
+  const bumpColor = scadColor(m.origColors.bump.getHex());
+
+  scad += `  // Bumps\n`;
+  for (const b of m.bumps) {
+    // Use actual mesh position (includes deformOffset + wobble + melt + gravity + invert)
+    const px = b.mesh.position.x;
+    const py = b.mesh.position.y;
+    const pz = b.mesh.position.z;
+    // Actual mesh scale (includes growth + melt effects)
+    const sx = b.mesh.scale.x, sy = b.mesh.scale.y, sz = b.mesh.scale.z;
+    // SCAD coords: swap Y/Z
+    const sp = `[${px.toFixed(3)}, ${pz.toFixed(3)}, ${py.toFixed(3)}]`;
+
+    if (m.name === 'durian') {
+      // Conical spikes oriented outward from body center
+      // Direction in SCAD coords (Z-up): dx=Three.x, dy=Three.z, dz=Three.y-BH/2
+      const dx_s = px, dy_s = pz, dz_s = py - BH / 2;
+      const dlen = Math.sqrt(dx_s * dx_s + dy_s * dy_s + dz_s * dz_s) || 1;
+      const ndx = dx_s / dlen, ndy = dy_s / dlen, ndz = dz_s / dlen;
+      // Rotate cone from default Z-up to direction: angle-axis from cross product
+      const angle = Math.acos(Math.max(-1, Math.min(1, ndz))) * 180 / Math.PI;
+      // Cross product of (0,0,1) x (ndx,ndy,ndz) = (-ndy, ndx, 0)
+      const cx = -ndy, cy = ndx;
+      const clen = Math.sqrt(cx * cx + cy * cy);
+      const spikeH = (8 * sy).toFixed(2);
+      const spikeR = (2.5 * sx).toFixed(2);
+      if (clen > 0.001) {
+        scad += `  color(${bumpColor}) translate(${sp}) rotate(a = ${angle.toFixed(1)}, v = [${(cx / clen).toFixed(4)}, ${(cy / clen).toFixed(4)}, 0]) cylinder(h = ${spikeH}, r1 = ${spikeR}, r2 = 0, $fn = 6);\n`;
+      } else {
+        scad += `  color(${bumpColor}) translate(${sp}) cylinder(h = ${spikeH}, r1 = ${spikeR}, r2 = 0, $fn = 6);\n`;
+      }
+    } else if (m.name === 'pineapple') {
+      scad += `  color(${bumpColor}) translate(${sp}) scale([${sx.toFixed(3)}, ${sz.toFixed(3)}, ${(sy * 1.3).toFixed(3)}]) sphere(r = 3.5, $fn = 12);\n`;
+    } else if (m.name === 'watermelon') {
+      scad += `  color("Black") translate(${sp}) scale([${(sx * 0.7).toFixed(3)}, ${(sz * 0.4).toFixed(3)}, ${(sy * 1.2).toFixed(3)}]) sphere(r = 1.2, $fn = 8);\n`;
+    } else {
+      const bsz = m.name === 'dragonfruit' ? 1.5 : m.name === 'starfruit' ? 1.5 : 1.8;
+      scad += `  color(${bumpColor}) translate(${sp}) scale([${sx.toFixed(3)}, ${sz.toFixed(3)}, ${sy.toFixed(3)}]) sphere(r = ${bsz}, $fn = 12);\n`;
+    }
+  }
+
+  // --- Leaves/crown: read actual rendered state ---
+  const leafColor = m.name !== 'watermelon' ? scadColor(m.origColors.leaf.getHex()) : null;
+  // Crown Z position in SCAD (swap Y→Z from Three.js crown.position.y)
+  const crownZ = m.crown ? m.crown.position.y : BH - 3;
+
+  if (m.name === 'pineapple' || m.name === 'dragonfruit') {
+    scad += `\n  // Leaves\n`;
+    for (const lf of m.leaves) {
+      const a = lf.angleDeg;
+      // Use current mesh rotation (captures splay + melt effects)
+      const tilt = (-lf.mesh.rotation.x * 180 / Math.PI);
+      const lsx = lf.mesh.scale.x, lsy = lf.mesh.scale.y, lsz = lf.mesh.scale.z;
+      scad += `  color(${leafColor}) translate([0, 0, ${crownZ.toFixed(1)}])\n`;
+      scad += `  rotate([0, 0, ${a.toFixed(1)}]) rotate([${tilt.toFixed(1)}, 0, 0])\n`;
+      scad += `    scale([${lsx.toFixed(3)}, ${lsz.toFixed(3)}, ${lsy.toFixed(3)}])\n`;
+      scad += `    hull() {\n      scale([4, 1, 1]) sphere(r = 1, $fn = 8);\n`;
+      scad += `      translate([0, -5, 20]) scale([1.5, 0.5, 1]) sphere(r = 1, $fn = 8);\n    }\n`;
+    }
+  } else if (m.name === 'pear') {
+    scad += `\n  // Leaves\n`;
+    for (const lf of m.leaves) {
+      const a = lf.angleDeg;
+      const tilt = (-lf.mesh.rotation.x * 180 / Math.PI);
+      const lsx = lf.mesh.scale.x, lsy = lf.mesh.scale.y, lsz = lf.mesh.scale.z;
+      scad += `  color(${leafColor}) translate([0, 0, ${crownZ.toFixed(1)}])\n`;
+      scad += `  rotate([0, 0, ${a.toFixed(1)}]) rotate([${tilt.toFixed(1)}, 0, 0])\n`;
+      scad += `    scale([${lsx.toFixed(3)}, ${lsz.toFixed(3)}, ${lsy.toFixed(3)}])\n`;
+      scad += `    hull() {\n      scale([2.5, 0.75, 1]) sphere(r = 1, $fn = 8);\n`;
+      scad += `      translate([0, -3, 12]) scale([1, 0.4, 1]) sphere(r = 0.8, $fn = 8);\n    }\n`;
+    }
+    scad += `\n  // Stem\n  color(${leafColor}) translate([0, 0, ${BH}]) cylinder(h = 8, r1 = 1.2, r2 = 0.8, $fn = 12);\n`;
+  } else if (m.name === 'durian') {
+    scad += `\n  // Stem\n  color([0.478, 0.420, 0.235])\n  translate([0, 0, ${(BH - 2).toFixed(1)}]) cylinder(h = 8, r1 = 5, r2 = 3, $fn = 8);\n`;
+    scad += `  // Stem leaves\n`;
+    for (const lf of m.leaves) {
+      if (lf.angleDeg === 0 && lf.origTiltRad === 0) continue; // skip stem mesh
+      const a = lf.angleDeg;
+      const tilt = (-lf.mesh.rotation.x * 180 / Math.PI);
+      const lsx = lf.mesh.scale.x, lsy = lf.mesh.scale.y, lsz = lf.mesh.scale.z;
+      scad += `  color(${leafColor}) translate([0, 0, ${(BH + 4).toFixed(1)}])\n`;
+      scad += `  rotate([0, 0, ${a.toFixed(1)}]) rotate([${tilt.toFixed(1)}, 0, 0])\n`;
+      scad += `    scale([${lsx.toFixed(3)}, ${lsz.toFixed(3)}, ${lsy.toFixed(3)}])\n`;
+      scad += `    hull() {\n      scale([2.5, 0.75, 1]) sphere(r = 0.8, $fn = 8);\n`;
+      scad += `      translate([0, -3, 8]) scale([1, 0.3, 1]) sphere(r = 0.5, $fn = 8);\n    }\n`;
+    }
+  } else if (m.name === 'banana') {
+    scad += `\n  // Stem\n  color(${leafColor})\n  translate([0, 0, ${BH}]) cylinder(h = 6, r1 = 2.5, r2 = 1.5, $fn = 8);\n`;
+  } else if (m.name === 'starfruit') {
+    scad += `\n  // Stem\n  color(${leafColor})\n  translate([0, 0, ${(BH - 2).toFixed(1)}]) cylinder(h = 5, r1 = 1.5, r2 = 0.8, $fn = 8);\n`;
+  }
+
+  scad += `}\n\n// Base\ncylinder(h = 2, r1 = 12, r2 = 10, $fn = 32);\n`;
+
+  const blob = new Blob([scad], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = m.name + '_export.scad'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+// =====================================================
+// ANIMATION LOOP
+// =====================================================
+let lastFrameTime = performance.now();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
+
+  if (playing && !scrubbing) {
+    animTime += dt * playbackSpeed;
+    if (animTime < 0) animTime += MAX_TIME;
+    if (animTime > MAX_TIME) animTime -= MAX_TIME;
+  }
+  if (!scrubbing) scrubEl.value = Math.round(animTime * 100);
+  timeDisp.textContent = animTime.toFixed(2) + 's';
+
+  const t = animTime;
+  const m = activeModel;
+  const BH = m.bodyHeight, BR = m.bodyRadius;
+
+  // --- Static transforms ---
+  const extrudeScale = 1 + state.extrude / 100;
+  const squeezeScale = 1 - state.squeeze * 0.6 / 100;
+  const smushY = 1 - state.smush * 0.7 / 100;
+  const smushXZ = 1 + state.smush * 0.4 / 100;
+
+  m.group.rotation.z = state.roll * Math.PI / 100;
+
+  // Throb
+  const th = state.throb / 100;
+  const throbPulse = th > 0 ? 1 + Math.sin(t * 3) * th * 0.25 : 1;
+  const throbPulseY = th > 0 ? 1 + Math.sin(t * 3 + 0.5) * th * 0.15 : 1;
+
+  m.group.scale.set(
+    squeezeScale * smushXZ * throbPulse,
+    extrudeScale * smushY * throbPulseY,
+    squeezeScale * smushXZ * throbPulse
+  );
+
+  const wb = state.wibble / 100;
+  const ml = state.melt / 100;
+  const g = state.galumph / 100;
+  const inv = state.invert / 100;
+
+  // Galumph
+  if (g > 0) {
+    m.group.rotation.x = Math.sin(t * 3.5) * g * 0.3;
+    m.group.rotation.z = state.roll * Math.PI / 100 + Math.cos(t * 2.7) * g * 0.25;
+    m.group.position.y = Math.abs(Math.sin(t * 4.2)) * g * 8;
+  } else {
+    m.group.rotation.x = 0;
+    m.group.position.y = 0;
+  }
+
+  // --- Invert: body mesh vertex manipulation ---
+  if (inv > 0) {
+    const posAttr = m.bodyGeo.attributes.position;
+    const arr = posAttr.array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const ox = m.bodyOrigPositions[i], oy = m.bodyOrigPositions[i+1], oz = m.bodyOrigPositions[i+2];
+      const factor = inv <= 0.5 ? 1 - inv * 2 : (inv - 0.5) * 2 - 1;
+      arr[i] = ox * factor; arr[i+1] = oy * factor; arr[i+2] = oz * factor;
+    }
+    posAttr.needsUpdate = true;
+    m.bodyGeo.computeVertexNormals();
+    m.materials.body.side = inv > 0.5 ? THREE.BackSide : THREE.FrontSide;
+  } else {
+    const posAttr = m.bodyGeo.attributes.position;
+    posAttr.array.set(m.bodyOrigPositions);
+    posAttr.needsUpdate = true;
+    m.materials.body.side = THREE.FrontSide;
+  }
+
+  // --- Update bumps ---
+  const bodyCenter = new THREE.Vector3(0, BH / 2, 0);
+  for (const b of m.bumps) {
+    let sx = b.origScale.x, sy = b.origScale.y, sz = b.origScale.z;
+    let px = b.origPos.x + b.deformOffset.x;
+    let py = b.origPos.y + b.deformOffset.y;
+    let pz = b.origPos.z + b.deformOffset.z;
+
+    if (g > 0) {
+      const phase = b.row * 0.8 + b.col * 0.3;
+      const pulse = 1 + Math.sin(t * 5 + phase) * g * 0.3;
+      sx *= pulse; sy *= pulse; sz *= pulse;
+    }
+    if (wb > 0) {
+      const wavePhase = b.origPos.y * 0.12 - t * 4;
+      const waveAmt = Math.sin(wavePhase) * wb * 5;
+      const dist = Math.sqrt(b.origPos.x ** 2 + b.origPos.z ** 2);
+      if (dist > 0.01) { px += (b.origPos.x / dist) * waveAmt; pz += (b.origPos.z / dist) * waveAmt; }
+    }
+    if (ml > 0) {
+      const hf = b.origPos.y / BH;
+      py -= hf * hf * ml * 30;
+      const spread = 1 + hf * ml * 0.4;
+      px = b.origPos.x * spread + (px - b.origPos.x);
+      pz = b.origPos.z * spread + (pz - b.origPos.z);
+      sy *= 1 - hf * ml * 0.5; sx *= 1 + hf * ml * 0.3; sz *= 1 + hf * ml * 0.3;
+    }
+    if (inv > 0) {
+      const factor = inv <= 0.5 ? 1 - inv * 2 : (inv - 0.5) * 2 - 1;
+      px = bodyCenter.x + (px - bodyCenter.x) * factor;
+      py = bodyCenter.y + (py - bodyCenter.y) * factor;
+      pz = bodyCenter.z + (pz - bodyCenter.z) * factor;
+    }
+    b.mesh.scale.set(sx, sy, sz);
+    b.mesh.position.set(px, py, pz);
+  }
+
+  // --- Leaves: splay + melt + invert ---
+  const sp = state.splay / 100;
+  for (let i = 0; i < m.leaves.length; i++) {
+    const lf = m.leaves[i];
+    const flutter = sp > 0 ? Math.sin(t * 4 + i * 1.1) * sp * 0.08 : 0;
+    const extraTilt = sp * 0.8 + flutter;
+    let tiltX = lf.origTiltRad - extraTilt;
+    if (ml > 0) {
+      tiltX += ml * 1.2;
+      lf.mesh.scale.set(lf.origScale.x * (1 + ml * 0.2), lf.origScale.y * (1 - ml * 0.3), lf.origScale.z * (1 + ml * 0.2));
+    } else { lf.mesh.scale.copy(lf.origScale); }
+    if (inv > 0) {
+      const flipFactor = inv <= 0.5 ? 1 - inv * 2 : (inv - 0.5) * 2 - 1;
+      tiltX = tiltX * flipFactor;
+    }
+    lf.mesh.rotation.x = tiltX;
+  }
+
+  // Melt body - determine default body scale and crown Y per model
+  const defaultBodyScaleY = m.defaultBodyScaleY;
+  const defaultCrownY = m.defaultCrownY;
+
+  if (ml > 0) {
+    m.body.scale.set(1 + ml * 0.3, defaultBodyScaleY * (1 - ml * 0.4), 1 + ml * 0.3);
+    m.crown.position.y = defaultCrownY * (1 - ml * 0.35);
+  } else {
+    m.body.scale.set(1, defaultBodyScaleY, 1);
+    m.crown.position.y = defaultCrownY;
+  }
+
+  // Invert: crown position
+  if (inv > 0) {
+    const factor = inv <= 0.5 ? 1 - inv * 2 : (inv - 0.5) * 2 - 1;
+    const crownBase = m.crown.position.y;
+    const crownRel = crownBase - BH / 2;
+    m.crown.position.y = BH / 2 + crownRel * factor;
+  }
+
+  // --- Sulpherate ---
+  const s = state.sulpherate / 100;
+  m.materials.body.color.copy(m.origColors.body).lerp(sulphurColor, s);
+  m.materials.bump.color.copy(m.origColors.bump).lerp(sulphurColor, s);
+  m.materials.leaf.color.copy(m.origColors.leaf).lerp(sulphurColor, s * 0.7);
+  m.materials.body.emissive.setHex(0xeeee00).multiplyScalar(s * 0.3);
+  m.materials.bump.emissive.setHex(0xeeee00).multiplyScalar(s * 0.3);
+  m.materials.leaf.emissive.setHex(0xaaaa00).multiplyScalar(s * 0.2);
+
+  // --- Disco ---
+  const d = state.disco / 100;
+  if (d > 0) {
+    const hue = (t * 0.5) % 1;
+    discoLight.color.setHSL(hue, 1, 0.5);
+    discoLight.intensity = d * 3;
+    discoLight.position.set(Math.cos(t * 2) * 60, 40 + Math.sin(t * 1.3) * 20, Math.sin(t * 2) * 60);
+    const dc1 = new THREE.Color().setHSL(hue, 1, 0.3).multiplyScalar(d);
+    const dc2 = new THREE.Color().setHSL((t * 0.8 + 0.33) % 1, 1, 0.3).multiplyScalar(d);
+    const dc3 = new THREE.Color().setHSL((t * 0.6 + 0.66) % 1, 1, 0.3).multiplyScalar(d);
+    m.materials.body.emissive.add(dc1);
+    m.materials.bump.emissive.add(dc2);
+    m.materials.leaf.emissive.add(dc3);
+    scene.background.setHSL((t * 0.3) % 1, 0.3, 0.05 + d * 0.05);
+    if (d > 0.5 && Math.sin(t * 12) > 0.9) { scene.background.setHex(0x222233); ambientLight.intensity = 2; }
+    else { ambientLight.intensity = 0.5; }
+    gridHelper.material.color.setHSL(hue, 0.8, 0.3);
+  } else {
+    discoLight.intensity = 0;
+    scene.background.copy(bgColor);
+    ambientLight.intensity = 0.5;
+    gridHelper.material.color.setHex(0x333355);
+  }
+
+  orbitControls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
