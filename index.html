@@ -289,696 +289,461 @@ function createLeafGeo(leafW, leafTh, leafLen) {
 }
 
 // =====================================================
-// BUILD PINEAPPLE MODEL
+// SCAD PARAMETER PARSER
 // =====================================================
-function buildPineapple() {
-  const BH = 70, BR = 25, BS = 3.5, BROWS = 10, BPROW = 14;
-  const NL = 12, LL = 40, LW = 8, LTH = 2;
+function parseScadParams(text) {
+  const p = {};
+  for (const line of text.split('\n')) {
+    const m = line.match(/^(\w+)\s*=\s*(.+?)\s*;\s*(?:\/\/.*)?$/);
+    if (!m) continue;
+    const key = m[1], raw = m[2].trim();
+    if (raw.startsWith('"')) p[key] = raw.slice(1, -1);
+    else if (raw.startsWith('[')) p[key] = JSON.parse(raw);
+    else if (raw === 'true') p[key] = true;
+    else if (raw === 'false') p[key] = false;
+    else p[key] = parseFloat(raw);
+  }
+  return p;
+}
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdaa520, roughness: 0.6, metalness: 0.1 });
-  const bumpMat = new THREE.MeshStandardMaterial({ color: 0xc8951a, roughness: 0.7, metalness: 0.05 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2e8b2e, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
+// =====================================================
+// GENERIC FRUIT MODEL BUILDER
+// =====================================================
+function buildFruitFromParams(p) {
+  const BH = p.body_height, BR = p.body_radius;
+  const BS = p.bump_size, BROWS = p.bump_rows, BPROW = p.bumps_per_row;
+
+  // Materials
+  const bodyMat = new THREE.MeshStandardMaterial({ color: parseInt(p.body_color), roughness: p.body_roughness, metalness: p.body_metalness });
+  const bumpMat = new THREE.MeshStandardMaterial({ color: parseInt(p.bump_color), roughness: p.bump_roughness, metalness: p.bump_metalness });
+  const leafMat = new THREE.MeshStandardMaterial({ color: parseInt(p.leaf_color), roughness: p.leaf_roughness, metalness: p.leaf_metalness, side: THREE.DoubleSide });
 
   const group = new THREE.Group();
 
-  // Body
-  const bodyGeo = new THREE.SphereGeometry(BR, 48, 32);
+  // --- Body ---
+  let bodyGeo, body, defaultBodyScaleY = 1;
+
+  if (p.body_type === 'sphere') {
+    bodyGeo = new THREE.SphereGeometry(BR, 48, 32);
+    body = new THREE.Mesh(bodyGeo, bodyMat);
+    const yScale = p.body_y_scale || BH / (2 * BR);
+    body.scale.set(1, yScale, 1);
+    body.position.y = BH / 2;
+    defaultBodyScaleY = yScale;
+  } else if (p.body_type === 'lathe') {
+    const pts = [];
+    const profileSteps = 20;
+    const pc = p.profile_center, pw = p.profile_width, pts_scale = p.profile_taper_scale;
+    for (let i = 0; i <= profileSteps; i++) {
+      const t = i / profileSteps;
+      const y = t * BH;
+      const bottom = Math.exp(-((t - pc) ** 2) / pw) * BR;
+      const taper = BR * pts_scale * (1 - t) * Math.sqrt(Math.max(0, t));
+      let r = Math.max(bottom, taper);
+      if (t > 0.85) r *= (1 - t) / 0.15;
+      if (t < 0.03) r *= t / 0.03;
+      pts.push(new THREE.Vector2(Math.max(r, 0), y));
+    }
+    bodyGeo = new THREE.LatheGeometry(pts, 48);
+    body = new THREE.Mesh(bodyGeo, bodyMat);
+  } else if (p.body_type === 'tube') {
+    const segs = 40;
+    const curvePoints = [];
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      curvePoints.push(new THREE.Vector3(Math.sin(t * Math.PI) * p.tube_bend, t * BH, 0));
+    }
+    const curve = new THREE.CatmullRomCurve3(curvePoints);
+    bodyGeo = new THREE.TubeGeometry(curve, 48, BR, 16, false);
+    const posAttr = bodyGeo.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+      const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+      const t = Math.max(0, Math.min(1, y / BH));
+      const taper = Math.sin(t * Math.PI) * 0.7 + 0.3;
+      const pt = curve.getPoint(t);
+      const dx = x - pt.x, dz = z - pt.z;
+      posAttr.setX(i, pt.x + dx * taper);
+      posAttr.setZ(i, pt.z + dz * taper * p.tube_flatten_z);
+    }
+    bodyGeo.computeVertexNormals();
+    body = new THREE.Mesh(bodyGeo, bodyMat);
+    // Store curve for bump placement
+    p._curve = curve;
+    p._curvePoints = curvePoints;
+  } else if (p.body_type === 'extrude') {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.absarc(0, 0, BR, 0, Math.PI, false);
+    shape.lineTo(0, 0);
+    bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: p.slice_depth, bevelEnabled: false });
+    body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = BR;
+
+    // Rind
+    if (p.has_rind) {
+      const rindR = BR + p.rind_thickness;
+      const rindShape = new THREE.Shape();
+      rindShape.moveTo(BR, 0);
+      rindShape.absarc(0, 0, rindR, 0, Math.PI, false);
+      rindShape.lineTo(-BR, 0);
+      rindShape.absarc(0, 0, BR, Math.PI, 0, true);
+      const rindGeo = new THREE.ExtrudeGeometry(rindShape, { depth: p.slice_depth, bevelEnabled: false });
+      const rind = new THREE.Mesh(rindGeo, leafMat);
+      rind.position.y = BR;
+      group.add(rind);
+    }
+  } else if (p.body_type === 'star') {
+    const starPts = p.star_points;
+    const aSegs = starPts * 8, hSegs = 24;
+    const positions = [], normals = [], indices = [];
+    function starRadius(angle) {
+      const a5 = (angle % (Math.PI * 2 / starPts)) / (Math.PI * 2 / starPts);
+      const peak = Math.cos(a5 * Math.PI * 2 - Math.PI) * 0.5 + 0.5;
+      return BR * (0.55 + peak * 0.45);
+    }
+    for (let h = 0; h <= hSegs; h++) {
+      const t = h / hSegs, y = t * BH;
+      const taper = Math.sin(t * Math.PI) * 0.75 + 0.25;
+      for (let a = 0; a <= aSegs; a++) {
+        const angle = (a / aSegs) * Math.PI * 2;
+        const r = starRadius(angle) * taper;
+        positions.push(r * Math.cos(angle), y, r * Math.sin(angle));
+        normals.push(Math.cos(angle), 0, Math.sin(angle));
+      }
+    }
+    for (let h = 0; h < hSegs; h++) {
+      for (let a = 0; a < aSegs; a++) {
+        const i0 = h * (aSegs + 1) + a, i1 = i0 + 1;
+        const i2 = i0 + (aSegs + 1), i3 = i2 + 1;
+        indices.push(i0, i2, i1, i1, i2, i3);
+      }
+    }
+    bodyGeo = new THREE.BufferGeometry();
+    bodyGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    bodyGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    bodyGeo.setIndex(indices);
+    bodyGeo.computeVertexNormals();
+    body = new THREE.Mesh(bodyGeo, bodyMat);
+  }
+
   const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.scale.set(1, BH / (2 * BR), 1);
-  body.position.y = BH / 2;
   group.add(body);
 
-  // Bumps
+  // --- Bumps ---
   const bumps = [];
-  const bumpGeo = new THREE.SphereGeometry(BS, 8, 6);
-  for (let row = 0; row < BROWS; row++) {
-    const rowFrac = (row + 0.5) / BROWS;
-    const zPos = -BH / 2 + rowFrac * BH;
-    const zNorm = zPos / (BH / 2);
-    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
-    if (localR <= BS) continue;
-    for (let col = 0; col < BPROW; col++) {
-      const angleOffset = (row % 2 === 0) ? 0 : (360 / BPROW / 2);
-      const angle = (col * (360 / BPROW) + angleOffset) * Math.PI / 180;
+
+  if (p.bump_placement === 'grid') {
+    // Bumps on sphere/lathe surface in a row/col grid
+    const bScale = p.bump_scale || [1, 1, 1];
+    let bumpGeo;
+    if (p.bump_type === 'cone') {
+      bumpGeo = new THREE.ConeGeometry(p.cone_radius, p.cone_height, 6);
+      bumpGeo.translate(0, p.cone_height / 2, 0);
+    } else {
+      bumpGeo = new THREE.SphereGeometry(BS, p.bump_type === 'cone' ? 6 : 8, p.bump_type === 'cone' ? 4 : 6);
+    }
+
+    // Profile radius function for lathe bodies
+    let profileRadius;
+    if (p.body_type === 'lathe') {
+      const pc = p.profile_center, pw = p.profile_width, pts_scale = p.profile_taper_scale;
+      profileRadius = function(yVal) {
+        const t = Math.max(0, Math.min(1, yVal / BH));
+        const bottom = Math.exp(-((t - pc) ** 2) / pw) * BR;
+        const taper = BR * pts_scale * (1 - t) * Math.sqrt(Math.max(0, t));
+        let r = Math.max(bottom, taper);
+        if (t > 0.85) r *= (1 - t) / 0.15;
+        if (t < 0.03) r *= t / 0.03;
+        return Math.max(r, 0);
+      };
+    }
+
+    for (let row = 0; row < BROWS; row++) {
+      const rowFrac = (row + 0.5) / BROWS;
+      let yPos, localR;
+
+      if (p.body_type === 'lathe') {
+        yPos = rowFrac * BH;
+        localR = profileRadius(yPos);
+        if (localR <= BS * 1.5) continue;
+      } else {
+        // sphere body
+        const zPos = -BH / 2 + rowFrac * BH;
+        const zNorm = zPos / (BH / 2);
+        localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
+        yPos = zPos + BH / 2;
+        if (localR <= (p.bump_type === 'cone' ? 4 : BS)) continue;
+      }
+
+      for (let col = 0; col < BPROW; col++) {
+        const stagger = p.bump_stagger;
+        const angleOffset = stagger && (row % 2 === 0) ? 0 : stagger ? (360 / BPROW / 2) : 0;
+        const angle = (col * (360 / BPROW) + angleOffset) * Math.PI / 180;
+        const bump = new THREE.Mesh(bumpGeo, bumpMat);
+        bump.position.set(localR * Math.cos(angle), yPos, localR * Math.sin(angle));
+        bump.scale.set(bScale[0], bScale[1], bScale[2]);
+
+        if (p.bump_type === 'cone') {
+          // Orient cone outward from body center
+          const sx = bump.position.x, sy = bump.position.y - BH / 2, sz = bump.position.z;
+          const dir = new THREE.Vector3(sx, sy, sz).normalize();
+          bump.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+          // Random scale variation
+          if (p.cone_random_scale) bump.scale.set(1, 0.8 + Math.random() * p.cone_random_scale, 1);
+        }
+
+        group.add(bump);
+        bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+      }
+    }
+  } else if (p.bump_placement === 'curve') {
+    // Bumps along a tube curve
+    const bumpGeo = new THREE.SphereGeometry(BS, 6, 4);
+    const curve = p._curve;
+    for (let row = 0; row < BROWS; row++) {
+      const rowT = (row + 0.5) / BROWS;
+      const pt = curve.getPoint(rowT);
+      const taper = Math.sin(rowT * Math.PI) * 0.7 + 0.3;
+      const localR = BR * taper;
+      if (localR <= 3) continue;
+      for (let col = 0; col < BPROW; col++) {
+        const stagger = p.bump_stagger;
+        const angleOff = stagger ? (row % 2) * (360 / BPROW / 2) : 0;
+        const angle = (col * (360 / BPROW) + angleOff) * Math.PI / 180;
+        const bump = new THREE.Mesh(bumpGeo, bumpMat);
+        bump.position.set(
+          pt.x + Math.cos(angle) * localR,
+          pt.y,
+          pt.z + Math.sin(angle) * localR * p.tube_flatten_z
+        );
+        group.add(bump);
+        bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+      }
+    }
+  } else if (p.bump_placement === 'random') {
+    // Randomly scattered bumps (e.g. watermelon seeds)
+    const bumpGeo = new THREE.SphereGeometry(BS, 6, 4);
+    const bScale = p.bump_scale || [1, 1, 1];
+    const count = p.bump_count || 20;
+    for (let i = 0; i < count; i++) {
+      const angle = (0.15 + Math.random() * 0.7) * Math.PI;
+      const r = (0.25 + Math.random() * 0.5) * BR;
+      const x = r * Math.cos(angle), y = r * Math.sin(angle);
       const bump = new THREE.Mesh(bumpGeo, bumpMat);
-      bump.position.set(localR * Math.cos(angle), zPos + BH / 2, localR * Math.sin(angle));
-      bump.scale.set(1, 1.3, 1);
+      bump.position.set(x, y + BR, -0.5);
+      bump.scale.set(bScale[0], bScale[1], bScale[2]);
+      bump.rotation.z = angle - Math.PI / 2;
       group.add(bump);
-      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row: Math.floor(i / 4), col: i % 4, deformOffset: new THREE.Vector3() });
+    }
+  } else if (p.bump_placement === 'ridge') {
+    // Bumps at star ridge peaks
+    const bumpGeo = new THREE.SphereGeometry(BS, 6, 4);
+    const bScale = p.bump_scale || [1, 1, 1];
+    const starPts = p.star_points;
+    for (let row = 0; row < BROWS; row++) {
+      const t = (row + 0.5) / BROWS;
+      const y = t * BH;
+      const taper = Math.sin(t * Math.PI) * 0.75 + 0.25;
+      for (let pt = 0; pt < starPts; pt++) {
+        const angle = (pt / starPts) * Math.PI * 2;
+        const r = BR * taper;
+        const bump = new THREE.Mesh(bumpGeo, bumpMat);
+        bump.position.set(r * Math.cos(angle), y, r * Math.sin(angle));
+        bump.scale.set(bScale[0], bScale[1], bScale[2]);
+        group.add(bump);
+        bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col: pt, deformOffset: new THREE.Vector3() });
+      }
     }
   }
 
-  // Base
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(10, 12, 2, 32), bodyMat);
+  // --- Base ---
+  const baseMat = p.body_type === 'extrude' ? leafMat : bodyMat;
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(p.base_r1, p.base_r2, 2, 32), baseMat);
   base.position.y = 1;
   group.add(base);
 
-  // Leaves + crown
-  const leafGeo = createLeafGeo(LW, LTH, LL);
-  const leaves = [];
-  function addLeaf(parent, angleDeg, tiltDeg, sx, sy, sz) {
-    const leaf = new THREE.Mesh(leafGeo, leafMat);
-    leaf.rotation.order = 'YXZ';
-    leaf.rotation.y = angleDeg * Math.PI / 180;
-    leaf.rotation.x = -tiltDeg * Math.PI / 180;
-    leaf.scale.set(sx || 1, sy || 1, sz || 1);
-    parent.add(leaf);
-    leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
-  }
-  const crown = new THREE.Group();
-  crown.position.y = BH - 3;
-  for (let i = 0; i < NL / 2; i++) addLeaf(crown, i * (360 / (NL / 2)), 8, 1, 1, 1);
-  for (let i = 0; i < NL; i++) addLeaf(crown, i * (360 / NL) + 15, 22, 1, 1, 1);
-  for (let i = 0; i < NL; i++) addLeaf(crown, i * (360 / NL), 40, 1.1, 0.85, 1.1);
-  group.add(crown);
-
-  return {
-    name: 'pineapple', group, body, bodyGeo, bodyOrigPositions,
-    bodyHeight: BH, bodyRadius: BR,
-    defaultCrownY: BH - 3, defaultBodyScaleY: BH / (2 * BR),
-    bumps, leaves, crown,
-    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
-    origColors: { body: new THREE.Color(0xdaa520), bump: new THREE.Color(0xc8951a), leaf: new THREE.Color(0x2e8b2e) }
-  };
-}
-
-// =====================================================
-// BUILD PEAR MODEL
-// =====================================================
-function buildPear() {
-  const BH = 65, BR = 22, BS = 1.8, BROWS = 12, BPROW = 12;
-
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xb5c327, roughness: 0.55, metalness: 0.05 });
-  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x8a9420, roughness: 0.65, metalness: 0.05 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x1a5c1a, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
-  const stemMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1e, roughness: 0.8, metalness: 0.0 });
-
-  const group = new THREE.Group();
-
-  // Pear body: LatheGeometry from profile curve
-  // Profile: wide bulge at bottom, narrowing to a slender neck at top
-  const pts = [];
-  const profileSteps = 20;
-  for (let i = 0; i <= profileSteps; i++) {
-    const t = i / profileSteps; // 0 = bottom, 1 = top
-    const y = t * BH;
-    // Pear shape: combination of two bulges
-    // Bottom bulge (wide): gaussian centered at t=0.3
-    const bottom = Math.exp(-((t - 0.3) ** 2) / 0.05) * BR;
-    // Neck taper: smooth taper from wide to narrow
-    const taper = BR * 0.35 * (1 - t) * Math.sqrt(Math.max(0, t));
-    // Combine: max for smooth silhouette
-    let r = Math.max(bottom, taper);
-    // Ensure tip goes to 0
-    if (t > 0.85) r *= (1 - t) / 0.15;
-    if (t < 0.03) r *= t / 0.03;
-    pts.push(new THREE.Vector2(Math.max(r, 0), y));
+  // --- Stem ---
+  if (p.has_stem) {
+    const stemColor = p.stem_color ? parseInt(p.stem_color) : parseInt(p.leaf_color);
+    const stemMat = new THREE.MeshStandardMaterial({ color: stemColor, roughness: 0.8, metalness: 0.0 });
+    const stemGeo = new THREE.CylinderGeometry(p.stem_r1, p.stem_r2, p.stem_height, 8);
+    const stem = new THREE.Mesh(stemGeo, stemMat);
+    stem.position.y = p.stem_y;
+    if (p.stem_tilt) stem.rotation.z = p.stem_tilt;
+    group.add(stem);
   }
 
-  const bodyGeo = new THREE.LatheGeometry(pts, 48);
-  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  group.add(body);
-
-  // Sample the profile to get radius at a given height
-  function profileRadius(yVal) {
-    const t = Math.max(0, Math.min(1, yVal / BH));
-    const bottom = Math.exp(-((t - 0.3) ** 2) / 0.05) * BR;
-    const taper = BR * 0.35 * (1 - t) * Math.sqrt(Math.max(0, t));
-    let r = Math.max(bottom, taper);
-    if (t > 0.85) r *= (1 - t) / 0.15;
-    if (t < 0.03) r *= t / 0.03;
-    return Math.max(r, 0);
-  }
-
-  // Bumps (speckles)
-  const bumps = [];
-  const bumpGeo = new THREE.SphereGeometry(BS, 6, 4);
-  for (let row = 0; row < BROWS; row++) {
-    const rowFrac = (row + 0.5) / BROWS;
-    const yPos = rowFrac * BH;
-    const localR = profileRadius(yPos);
-    if (localR <= BS * 1.5) continue;
-    for (let col = 0; col < BPROW; col++) {
-      const angleOffset = (row % 2 === 0) ? 0 : (360 / BPROW / 2);
-      const angle = (col * (360 / BPROW) + angleOffset) * Math.PI / 180;
-      const bump = new THREE.Mesh(bumpGeo, bumpMat);
-      bump.position.set(localR * Math.cos(angle), yPos, localR * Math.sin(angle));
-      bump.scale.set(1, 1, 1);
-      group.add(bump);
-      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
-    }
-  }
-
-  // Base
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(8, 10, 2, 32), bodyMat);
-  base.position.y = 1;
-  group.add(base);
-
-  // Stem
-  const stemGeo = new THREE.CylinderGeometry(0.8, 1.2, 8, 8);
-  const stem = new THREE.Mesh(stemGeo, stemMat);
-  stem.position.y = BH + 2;
-  stem.rotation.z = 0.15; // slight tilt
-  group.add(stem);
-
-  // Leaves: small crown with 2 leaves
-  const leafGeo = createLeafGeo(5, 1.5, 18);
+  // --- Leaves/Crown ---
   const leaves = [];
   const crown = new THREE.Group();
-  crown.position.y = BH - 1;
+  crown.position.y = p.crown_y;
 
-  function addLeaf(angleDeg, tiltDeg, sx, sy, sz) {
-    const leaf = new THREE.Mesh(leafGeo, leafMat);
-    leaf.rotation.order = 'YXZ';
-    leaf.rotation.y = angleDeg * Math.PI / 180;
-    leaf.rotation.x = -tiltDeg * Math.PI / 180;
-    leaf.scale.set(sx || 1, sy || 1, sz || 1);
-    crown.add(leaf);
-    leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
-  }
-  addLeaf(30, 35, 1, 1, 1);
-  addLeaf(210, 40, 0.8, 0.9, 0.8);
-  group.add(crown);
+  if (p.leaf_placement === 'crown') {
+    const leafGeo = createLeafGeo(p.leaf_width, p.leaf_thickness, p.leaf_length);
+    const rings = p.leaf_rings || [];
 
-  return {
-    name: 'pear', group, body, bodyGeo, bodyOrigPositions,
-    bodyHeight: BH, bodyRadius: BR,
-    defaultCrownY: BH - 1, defaultBodyScaleY: 1,
-    bumps, leaves, crown,
-    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
-    origColors: { body: new THREE.Color(0xb5c327), bump: new THREE.Color(0x8a9420), leaf: new THREE.Color(0x1a5c1a) }
-  };
-}
+    if (p.name === 'banana') {
+      // Banana: stem + nub as special leaf items
+      const stemGeo = new THREE.CylinderGeometry(p.stem_r1, p.stem_r2, p.stem_height, 8);
+      const stem = new THREE.Mesh(stemGeo, leafMat);
+      // End-of-curve X offset
+      const endX = p._curvePoints ? p._curvePoints[p._curvePoints.length - 1].x - p._curvePoints[0].x : 0;
+      stem.position.set(endX, p.stem_height / 2, 0);
+      crown.add(stem);
+      leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
 
-// =====================================================
-// BUILD DRAGONFRUIT MODEL
-// =====================================================
-function buildDragonfruit() {
-  const BH = 60, BR = 22, BROWS = 8, BPROW = 10;
+      if (p.has_nub) {
+        const nubGeo = new THREE.SphereGeometry(p.nub_radius, 8, 6);
+        const nub = new THREE.Mesh(nubGeo, leafMat);
+        nub.position.set(0, -BH, 0);
+        crown.add(nub);
+        leaves.push({ mesh: nub, origTiltRad: 0, angleDeg: 180, origScale: nub.scale.clone() });
+      }
+    } else if (p.name === 'durian') {
+      // Durian: stem cylinder + leaves positioned above crown
+      const stemColor = p.stem_color ? parseInt(p.stem_color) : parseInt(p.leaf_color);
+      const stemMtl = new THREE.MeshStandardMaterial({ color: stemColor, roughness: 0.8 });
+      const stemGeo = new THREE.CylinderGeometry(p.stem_r1, p.stem_r2, p.stem_height, 8);
+      const stem = new THREE.Mesh(stemGeo, stemMtl);
+      stem.position.y = p.stem_height / 2;
+      crown.add(stem);
+      leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
 
-  // Hot pink body, green-tipped scale leaves, tiny pink bumps
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdd1177, roughness: 0.45, metalness: 0.05 });
-  const bumpMat = new THREE.MeshStandardMaterial({ color: 0xee3388, roughness: 0.5, metalness: 0.05 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x44bb44, roughness: 0.4, metalness: 0.0, side: THREE.DoubleSide });
+      for (const ring of rings) {
+        const [count, startAngle, tiltDeg, sx, sy, sz, yOff] = ring;
+        for (let i = 0; i < count; i++) {
+          const angleDeg = startAngle + i * (360 / count);
+          const leaf = new THREE.Mesh(leafGeo, leafMat);
+          leaf.rotation.order = 'YXZ';
+          leaf.rotation.y = angleDeg * Math.PI / 180;
+          leaf.rotation.x = -tiltDeg * Math.PI / 180;
+          leaf.position.y = yOff || p.stem_height - 2;
+          leaf.scale.set(sx || 1, sy || 1, sz || 1);
+          crown.add(leaf);
+          leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+        }
+      }
+    } else if (p.name === 'starfruit') {
+      // Starfruit: stem cylinder + tiny leaf
+      const stemGeo = new THREE.CylinderGeometry(p.stem_r1, p.stem_r2, p.stem_height, 8);
+      const stem = new THREE.Mesh(stemGeo, leafMat);
+      stem.position.y = 2;
+      crown.add(stem);
+      leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
 
-  const group = new THREE.Group();
-
-  // Body: elongated egg shape (scaled sphere, slightly taller than wide)
-  const bodyGeo = new THREE.SphereGeometry(BR, 48, 32);
-  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.scale.set(1, BH / (2 * BR), 1);
-  body.position.y = BH / 2;
-  group.add(body);
-
-  // Bumps: small pink nubs between the scale leaves
-  const bumps = [];
-  const bumpGeo = new THREE.SphereGeometry(1.5, 6, 4);
-  for (let row = 0; row < BROWS; row++) {
-    const rowFrac = (row + 0.5) / BROWS;
-    const zPos = -BH / 2 + rowFrac * BH;
-    const zNorm = zPos / (BH / 2);
-    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
-    if (localR <= 3) continue;
-    for (let col = 0; col < BPROW; col++) {
-      const angleOffset = (row % 2 === 0) ? 0 : (360 / BPROW / 2);
-      const angle = (col * (360 / BPROW) + angleOffset) * Math.PI / 180;
-      const bump = new THREE.Mesh(bumpGeo, bumpMat);
-      bump.position.set(localR * Math.cos(angle), zPos + BH / 2, localR * Math.sin(angle));
-      bump.scale.set(1, 1, 1);
-      group.add(bump);
-      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
+      for (const ring of rings) {
+        const [count, startAngle, tiltDeg, sx, sy, sz] = ring;
+        for (let i = 0; i < count; i++) {
+          const angleDeg = startAngle + i * (count > 1 ? 360 / count : 0);
+          const leaf = new THREE.Mesh(leafGeo, leafMat);
+          leaf.rotation.order = 'YXZ';
+          leaf.rotation.y = angleDeg * Math.PI / 180;
+          leaf.rotation.x = -tiltDeg * Math.PI / 180;
+          leaf.position.y = 3;
+          leaf.scale.set(sx || 1, sy || 1, sz || 1);
+          crown.add(leaf);
+          leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+        }
+      }
+    } else {
+      // Standard crown: rings of evenly-spaced leaves at crown origin
+      for (const ring of rings) {
+        const [count, startAngle, tiltDeg, sx, sy, sz] = ring;
+        for (let i = 0; i < count; i++) {
+          const angleDeg = startAngle + i * (360 / count);
+          const leaf = new THREE.Mesh(leafGeo, leafMat);
+          leaf.rotation.order = 'YXZ';
+          leaf.rotation.y = angleDeg * Math.PI / 180;
+          leaf.rotation.x = -tiltDeg * Math.PI / 180;
+          leaf.scale.set(sx || 1, sy || 1, sz || 1);
+          crown.add(leaf);
+          leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+        }
+      }
     }
-  }
+  } else if (p.leaf_placement === 'surface') {
+    // Leaves/scales positioned on body surface (dragonfruit)
+    const scaleGeo = createLeafGeo(p.leaf_width, p.leaf_thickness, p.leaf_length);
+    const sRows = p.scale_rows, sPRow = p.scales_per_row;
+    const baseTilt = p.scale_base_tilt, tiltPerRow = p.scale_tilt_per_row;
 
-  // Base
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(9, 11, 2, 32), bodyMat);
-  base.position.y = 1;
-  group.add(base);
+    for (let row = 0; row < sRows; row++) {
+      const rowFrac = (row + 0.5) / sRows;
+      const zPos = -BH / 2 + rowFrac * BH;
+      const zNorm = zPos / (BH / 2);
+      const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
+      if (localR <= 4) continue;
 
-  // Scale leaves: fleshy triangular protrusions covering the body
-  // These are the signature dragonfruit feature - green-tipped scales
-  const scaleGeo = createLeafGeo(6, 2, 14);
-  const leaves = [];
-  const crown = new THREE.Group();
-  crown.position.y = BH / 2; // center of body
-
-  const scaleRows = 6;
-  const scalesPerRow = 8;
-  for (let row = 0; row < scaleRows; row++) {
-    const rowFrac = (row + 0.5) / scaleRows;
-    const zPos = -BH / 2 + rowFrac * BH;
-    const zNorm = zPos / (BH / 2);
-    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
-    if (localR <= 4) continue;
-
-    for (let col = 0; col < scalesPerRow; col++) {
-      const angleOffset = (row % 2 === 0) ? 0 : (360 / scalesPerRow / 2);
-      const angleDeg = col * (360 / scalesPerRow) + angleOffset;
-      const angleRad = angleDeg * Math.PI / 180;
-
-      const leaf = new THREE.Mesh(scaleGeo, leafMat);
-      // Position on the body surface
-      leaf.position.set(
-        localR * Math.cos(angleRad),
-        zPos, // relative to crown center at BH/2
-        localR * Math.sin(angleRad)
-      );
-      // Orient: point outward radially, tilted upward
-      leaf.rotation.order = 'YXZ';
-      leaf.rotation.y = angleDeg * Math.PI / 180;
-      const tiltDeg = 55 + row * 3; // more upright near top
-      leaf.rotation.x = -tiltDeg * Math.PI / 180;
-      leaf.scale.set(0.6, 0.6 + rowFrac * 0.3, 0.6);
-      crown.add(leaf);
-      leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+      for (let col = 0; col < sPRow; col++) {
+        const angleOffset = (row % 2 === 0) ? 0 : (360 / sPRow / 2);
+        const angleDeg = col * (360 / sPRow) + angleOffset;
+        const angleRad = angleDeg * Math.PI / 180;
+        const leaf = new THREE.Mesh(scaleGeo, leafMat);
+        leaf.position.set(localR * Math.cos(angleRad), zPos, localR * Math.sin(angleRad));
+        leaf.rotation.order = 'YXZ';
+        leaf.rotation.y = angleRad;
+        const tiltDeg = baseTilt + row * tiltPerRow;
+        leaf.rotation.x = -tiltDeg * Math.PI / 180;
+        const sy = p.scale_sy_min + rowFrac * (p.scale_sy_max - p.scale_sy_min);
+        leaf.scale.set(p.scale_sx, sy, p.scale_sz);
+        crown.add(leaf);
+        leaves.push({ mesh: leaf, origTiltRad: -tiltDeg * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+      }
     }
-  }
 
-  // Top tuft: a few upright leaves at the very top
-  for (let i = 0; i < 5; i++) {
-    const angleDeg = i * 72;
-    const leaf = new THREE.Mesh(scaleGeo, leafMat);
-    leaf.position.set(0, BH / 2 - 5, 0);
-    leaf.rotation.order = 'YXZ';
-    leaf.rotation.y = angleDeg * Math.PI / 180;
-    leaf.rotation.x = -15 * Math.PI / 180;
-    leaf.scale.set(0.5, 0.7, 0.5);
-    crown.add(leaf);
-    leaves.push({ mesh: leaf, origTiltRad: -15 * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+    // Top tuft
+    if (p.tuft_count) {
+      const ts = p.tuft_scale;
+      for (let i = 0; i < p.tuft_count; i++) {
+        const angleDeg = i * (360 / p.tuft_count);
+        const leaf = new THREE.Mesh(scaleGeo, leafMat);
+        leaf.position.set(0, BH / 2 + p.tuft_y_offset, 0);
+        leaf.rotation.order = 'YXZ';
+        leaf.rotation.y = angleDeg * Math.PI / 180;
+        leaf.rotation.x = -p.tuft_tilt * Math.PI / 180;
+        leaf.scale.set(ts[0], ts[1], ts[2]);
+        crown.add(leaf);
+        leaves.push({ mesh: leaf, origTiltRad: -p.tuft_tilt * Math.PI / 180, angleDeg, origScale: leaf.scale.clone() });
+      }
+    }
   }
 
   group.add(crown);
 
-  return {
-    name: 'dragonfruit', group, body, bodyGeo, bodyOrigPositions,
-    bodyHeight: BH, bodyRadius: BR,
-    defaultCrownY: BH / 2, defaultBodyScaleY: BH / (2 * BR),
-    bumps, leaves, crown,
-    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
-    origColors: { body: new THREE.Color(0xdd1177), bump: new THREE.Color(0xee3388), leaf: new THREE.Color(0x44bb44) }
-  };
-}
-
-// =====================================================
-// BUILD BANANA MODEL
-// =====================================================
-function buildBanana() {
-  const BH = 80, BR = 12;
-
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffe135, roughness: 0.4, metalness: 0.05 });
-  const bumpMat = new THREE.MeshStandardMaterial({ color: 0xd4b82a, roughness: 0.5, metalness: 0.05 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide });
-
-  const group = new THREE.Group();
-
-  // Banana body: curved cylinder using LatheGeometry with a banana-shaped profile
-  // We'll build a tube along a curved path
-  const segs = 40;
-  const curvePoints = [];
-  for (let i = 0; i <= segs; i++) {
-    const t = i / segs;
-    const y = t * BH;
-    // Curve: parabolic arc that gives banana its bend
-    const bend = Math.sin(t * Math.PI) * 18;
-    curvePoints.push(new THREE.Vector3(bend, y, 0));
-  }
-  const curve = new THREE.CatmullRomCurve3(curvePoints);
-  const bodyGeo = new THREE.TubeGeometry(curve, 48, BR, 16, false);
-  // Taper the tube: scale vertices based on position along curve
-  const posAttr = bodyGeo.attributes.position;
-  for (let i = 0; i < posAttr.count; i++) {
-    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
-    // Find closest t on curve
-    const t = Math.max(0, Math.min(1, y / BH));
-    // Taper: thicker in middle, thin at ends
-    const taper = Math.sin(t * Math.PI) * 0.7 + 0.3;
-    // Slightly flatten cross-section for banana ridge effect
-    const pt = curve.getPoint(t);
-    const dx = x - pt.x, dz = z - pt.z;
-    posAttr.setX(i, pt.x + dx * taper);
-    posAttr.setZ(i, pt.z + dz * taper * 0.85);
-  }
-  bodyGeo.computeVertexNormals();
-  const bodyOrigPositions = new Float32Array(posAttr.array);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  group.add(body);
-
-  // Brown spots/speckles as bumps
-  const bumps = [];
-  const bumpGeo = new THREE.SphereGeometry(1.2, 6, 4);
-  for (let row = 0; row < 10; row++) {
-    const rowT = (row + 0.5) / 10;
-    const pt = curve.getPoint(rowT);
-    const taper = Math.sin(rowT * Math.PI) * 0.7 + 0.3;
-    const localR = BR * taper;
-    if (localR <= 3) continue;
-    for (let col = 0; col < 8; col++) {
-      const angle = (col * 45 + (row % 2) * 22.5) * Math.PI / 180;
-      const bump = new THREE.Mesh(bumpGeo, bumpMat);
-      bump.position.set(
-        pt.x + Math.cos(angle) * localR,
-        pt.y,
-        pt.z + Math.sin(angle) * localR * 0.85
-      );
-      group.add(bump);
-      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
-    }
-  }
-
-  // Base
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(6, 8, 2, 32), bodyMat);
-  base.position.y = 1;
-  group.add(base);
-
-  // Stem at top and bottom nub
-  const leaves = [];
-  const crown = new THREE.Group();
-  crown.position.y = BH;
-  const stemGeo = new THREE.CylinderGeometry(1.5, 2.5, 6, 8);
-  const stem = new THREE.Mesh(stemGeo, leafMat);
-  stem.position.set(curvePoints[segs].x - curvePoints[0].x, 3, 0);
-  crown.add(stem);
-  leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
-
-  // Bottom nub
-  const nubGeo = new THREE.SphereGeometry(2, 8, 6);
-  const nub = new THREE.Mesh(nubGeo, leafMat);
-  nub.position.set(0, -BH, 0);
-  crown.add(nub);
-  leaves.push({ mesh: nub, origTiltRad: 0, angleDeg: 180, origScale: nub.scale.clone() });
-
-  group.add(crown);
+  // Display height for watermelon is BR * 2
+  const displayBH = p.body_type === 'extrude' ? BR * 2 : BH;
+  const displayCrownY = p.body_type === 'extrude' ? BR * 2 : p.crown_y;
 
   return {
-    name: 'banana', group, body, bodyGeo, bodyOrigPositions,
-    bodyHeight: BH, bodyRadius: BR,
-    defaultCrownY: BH, defaultBodyScaleY: 1,
+    name: p.name, group, body, bodyGeo, bodyOrigPositions,
+    bodyHeight: displayBH, bodyRadius: BR,
+    defaultCrownY: displayCrownY, defaultBodyScaleY: defaultBodyScaleY,
     bumps, leaves, crown,
     materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
-    origColors: { body: new THREE.Color(0xffe135), bump: new THREE.Color(0xd4b82a), leaf: new THREE.Color(0x8b6914) }
-  };
-}
-
-// =====================================================
-// BUILD DURIAN MODEL
-// =====================================================
-function buildDurian() {
-  const BH = 65, BR = 28;
-
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8b9a3c, roughness: 0.7, metalness: 0.05 });
-  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x6b7a2c, roughness: 0.8, metalness: 0.1 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x5a6b22, roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide });
-
-  const group = new THREE.Group();
-
-  // Body: chunky ovoid
-  const bodyGeo = new THREE.SphereGeometry(BR, 48, 32);
-  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.scale.set(1, BH / (2 * BR), 1);
-  body.position.y = BH / 2;
-  group.add(body);
-
-  // Spikes! Lots of conical spikes covering the body
-  const bumps = [];
-  const spikeGeo = new THREE.ConeGeometry(2.5, 8, 6);
-  spikeGeo.translate(0, 4, 0); // pivot at base
-  const SROWS = 12, SPROW = 14;
-  for (let row = 0; row < SROWS; row++) {
-    const rowFrac = (row + 0.5) / SROWS;
-    const zPos = -BH / 2 + rowFrac * BH;
-    const zNorm = zPos / (BH / 2);
-    const localR = BR * Math.sqrt(Math.max(0, 1 - zNorm * zNorm));
-    if (localR <= 4) continue;
-    for (let col = 0; col < SPROW; col++) {
-      const angleOffset = (row % 2 === 0) ? 0 : (360 / SPROW / 2);
-      const angle = (col * (360 / SPROW) + angleOffset) * Math.PI / 180;
-      const spike = new THREE.Mesh(spikeGeo, bumpMat);
-      const sx = localR * Math.cos(angle);
-      const sz = localR * Math.sin(angle);
-      const sy = zPos + BH / 2;
-      spike.position.set(sx, sy, sz);
-      // Orient spike outward from body center
-      const dir = new THREE.Vector3(sx, sy - BH / 2, sz).normalize();
-      spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      spike.scale.set(1, 0.8 + Math.random() * 0.4, 1);
-      group.add(spike);
-      bumps.push({ mesh: spike, origPos: spike.position.clone(), origScale: spike.scale.clone(), row, col, deformOffset: new THREE.Vector3() });
-    }
-  }
-
-  // Base
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(10, 12, 2, 32), bodyMat);
-  base.position.y = 1;
-  group.add(base);
-
-  // Small stem at top
-  const leaves = [];
-  const crown = new THREE.Group();
-  crown.position.y = BH - 2;
-  const stemGeo = new THREE.CylinderGeometry(3, 5, 8, 8);
-  const stemMat = new THREE.MeshStandardMaterial({ color: 0x7a6b3c, roughness: 0.8 });
-  const stem = new THREE.Mesh(stemGeo, stemMat);
-  stem.position.y = 4;
-  crown.add(stem);
-  leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
-
-  // A few small leaves at the stem
-  const leafGeo = createLeafGeo(5, 1.5, 12);
-  for (let i = 0; i < 4; i++) {
-    const leaf = new THREE.Mesh(leafGeo, leafMat);
-    leaf.rotation.order = 'YXZ';
-    leaf.rotation.y = (i * 90) * Math.PI / 180;
-    leaf.rotation.x = -50 * Math.PI / 180;
-    leaf.position.y = 6;
-    leaf.scale.set(0.6, 0.5, 0.6);
-    crown.add(leaf);
-    leaves.push({ mesh: leaf, origTiltRad: -50 * Math.PI / 180, angleDeg: i * 90, origScale: leaf.scale.clone() });
-  }
-  group.add(crown);
-
-  return {
-    name: 'durian', group, body, bodyGeo, bodyOrigPositions,
-    bodyHeight: BH, bodyRadius: BR,
-    defaultCrownY: BH - 2, defaultBodyScaleY: BH / (2 * BR),
-    bumps, leaves, crown,
-    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
-    origColors: { body: new THREE.Color(0x8b9a3c), bump: new THREE.Color(0x6b7a2c), leaf: new THREE.Color(0x5a6b22) }
-  };
-}
-
-// =====================================================
-// BUILD WATERMELON WEDGE MODEL
-// =====================================================
-function buildWatermelon() {
-  const BH = 50, BR = 30;
-
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff3355, roughness: 0.4, metalness: 0.0 });
-  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.3, metalness: 0.2 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2d8a2d, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
-
-  const group = new THREE.Group();
-  const sliceDepth = 12;
-
-  // Half-disc watermelon slice using ExtrudeGeometry
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0);
-  shape.absarc(0, 0, BR, 0, Math.PI, false);
-  shape.lineTo(0, 0);
-
-  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: sliceDepth, bevelEnabled: false });
-  // Reposition so it sits upright: the shape is in XY, extrude along Z
-  // Rotate to stand upright with flat face visible
-  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = BR; // lift so bottom of semicircle sits on ground
-  group.add(body);
-
-  // Green rind: a slightly larger semicircular strip on the curved edge
-  const rindShape = new THREE.Shape();
-  const rindR = BR + 3;
-  rindShape.moveTo(BR, 0);
-  rindShape.absarc(0, 0, rindR, 0, Math.PI, false);
-  rindShape.lineTo(-BR, 0);
-  rindShape.absarc(0, 0, BR, Math.PI, 0, true);
-  const rindGeo = new THREE.ExtrudeGeometry(rindShape, { depth: sliceDepth, bevelEnabled: false });
-  const rind = new THREE.Mesh(rindGeo, leafMat);
-  rind.position.y = BR;
-  group.add(rind);
-
-  // Seeds scattered on the front flat face
-  const bumps = [];
-  const seedGeo = new THREE.SphereGeometry(1.2, 6, 4);
-  for (let i = 0; i < 20; i++) {
-    // Random positions within semicircle, biased toward center
-    const angle = (0.15 + Math.random() * 0.7) * Math.PI;
-    const r = (0.25 + Math.random() * 0.5) * BR;
-    const x = r * Math.cos(angle);
-    const y = r * Math.sin(angle);
-    const seed = new THREE.Mesh(seedGeo, bumpMat);
-    seed.position.set(x, y + BR, -0.5);
-    seed.scale.set(0.7, 1.2, 0.4);
-    seed.rotation.z = angle - Math.PI / 2;
-    group.add(seed);
-    bumps.push({ mesh: seed, origPos: seed.position.clone(), origScale: seed.scale.clone(), row: Math.floor(i / 4), col: i % 4, deformOffset: new THREE.Vector3() });
-  }
-
-  // Base
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(10, 12, 2, 32), leafMat);
-  base.position.y = 1;
-  group.add(base);
-
-  const leaves = [];
-  const crown = new THREE.Group();
-  crown.position.y = BR * 2;
-  group.add(crown);
-
-  return {
-    name: 'watermelon', group, body, bodyGeo, bodyOrigPositions,
-    bodyHeight: BR * 2, bodyRadius: BR,
-    defaultCrownY: BR * 2, defaultBodyScaleY: 1,
-    bumps, leaves, crown,
-    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
-    origColors: { body: new THREE.Color(0xff3355), bump: new THREE.Color(0x222222), leaf: new THREE.Color(0x2d8a2d) }
-  };
-}
-
-// =====================================================
-// BUILD STARFRUIT MODEL
-// =====================================================
-function buildStarfruit() {
-  const BH = 60, BR = 18;
-
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xc8d82e, roughness: 0.35, metalness: 0.05 });
-  const bumpMat = new THREE.MeshStandardMaterial({ color: 0x9aaa20, roughness: 0.5, metalness: 0.05 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x7a8a18, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide });
-
-  const group = new THREE.Group();
-
-  // Starfruit: 5-pointed star cross-section extruded vertically with taper
-  // Build using LatheGeometry-like approach but with star profile
-  const starPoints = 5;
-  const aSegs = starPoints * 8; // angular resolution
-  const hSegs = 24;
-  const positions = [], normals = [], indices = [];
-
-  function starRadius(angle) {
-    // 5-pointed star profile
-    const a5 = ((angle % (Math.PI * 2 / starPoints)) / (Math.PI * 2 / starPoints));
-    // Smooth star shape using cosine
-    const peak = Math.cos(a5 * Math.PI * 2 - Math.PI) * 0.5 + 0.5;
-    return BR * (0.55 + peak * 0.45);
-  }
-
-  for (let h = 0; h <= hSegs; h++) {
-    const t = h / hSegs;
-    const y = t * BH;
-    // Taper: thinner at top and bottom
-    const taper = Math.sin(t * Math.PI) * 0.75 + 0.25;
-    for (let a = 0; a <= aSegs; a++) {
-      const angle = (a / aSegs) * Math.PI * 2;
-      const r = starRadius(angle) * taper;
-      positions.push(r * Math.cos(angle), y, r * Math.sin(angle));
-      // Approximate normal: outward direction
-      const nx = Math.cos(angle), nz = Math.sin(angle);
-      normals.push(nx, 0, nz);
-    }
-  }
-  for (let h = 0; h < hSegs; h++) {
-    for (let a = 0; a < aSegs; a++) {
-      const i0 = h * (aSegs + 1) + a;
-      const i1 = i0 + 1;
-      const i2 = i0 + (aSegs + 1);
-      const i3 = i2 + 1;
-      indices.push(i0, i2, i1, i1, i2, i3);
-    }
-  }
-
-  const bodyGeo = new THREE.BufferGeometry();
-  bodyGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  bodyGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  bodyGeo.setIndex(indices);
-  bodyGeo.computeVertexNormals();
-
-  const bodyOrigPositions = new Float32Array(bodyGeo.attributes.position.array);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  group.add(body);
-
-  // Ridges along the star points as bumps (subtle highlights)
-  const bumps = [];
-  const ridgeGeo = new THREE.SphereGeometry(1.5, 6, 4);
-  for (let row = 0; row < 8; row++) {
-    const t = (row + 0.5) / 8;
-    const y = t * BH;
-    const taper = Math.sin(t * Math.PI) * 0.75 + 0.25;
-    for (let p = 0; p < starPoints; p++) {
-      const angle = (p / starPoints) * Math.PI * 2;
-      const r = BR * taper;
-      const bump = new THREE.Mesh(ridgeGeo, bumpMat);
-      bump.position.set(r * Math.cos(angle), y, r * Math.sin(angle));
-      bump.scale.set(1.2, 1.2, 0.6);
-      group.add(bump);
-      bumps.push({ mesh: bump, origPos: bump.position.clone(), origScale: bump.scale.clone(), row, col: p, deformOffset: new THREE.Vector3() });
-    }
-  }
-
-  // Base
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(6, 8, 2, 32), bodyMat);
-  base.position.y = 1;
-  group.add(base);
-
-  // Small stem at top
-  const leaves = [];
-  const crown = new THREE.Group();
-  crown.position.y = BH - 2;
-  const stemGeo = new THREE.CylinderGeometry(0.8, 1.5, 5, 8);
-  const stem = new THREE.Mesh(stemGeo, leafMat);
-  stem.position.y = 2;
-  crown.add(stem);
-  leaves.push({ mesh: stem, origTiltRad: 0, angleDeg: 0, origScale: stem.scale.clone() });
-
-  // Tiny leaf
-  const leafGeo = createLeafGeo(4, 1, 10);
-  const leaf = new THREE.Mesh(leafGeo, leafMat);
-  leaf.rotation.order = 'YXZ';
-  leaf.rotation.y = 0.3;
-  leaf.rotation.x = -40 * Math.PI / 180;
-  leaf.position.y = 3;
-  leaf.scale.set(0.5, 0.5, 0.5);
-  crown.add(leaf);
-  leaves.push({ mesh: leaf, origTiltRad: -40 * Math.PI / 180, angleDeg: 17, origScale: leaf.scale.clone() });
-  group.add(crown);
-
-  return {
-    name: 'starfruit', group, body, bodyGeo, bodyOrigPositions,
-    bodyHeight: BH, bodyRadius: BR,
-    defaultCrownY: BH - 2, defaultBodyScaleY: 1,
-    bumps, leaves, crown,
-    materials: { body: bodyMat, bump: bumpMat, leaf: leafMat },
-    origColors: { body: new THREE.Color(0xc8d82e), bump: new THREE.Color(0x9aaa20), leaf: new THREE.Color(0x7a8a18) }
+    origColors: { body: new THREE.Color(parseInt(p.body_color)), bump: new THREE.Color(parseInt(p.bump_color)), leaf: new THREE.Color(parseInt(p.leaf_color)) },
+    // Metadata for SCAD export dispatch
+    bumpType: p.bump_type, bumpPlacement: p.bump_placement, leafPlacement: p.leaf_placement,
+    params: p
   };
 }
 
 // =====================================================
 // MODEL MANAGEMENT
 // =====================================================
-const pineappleModel = buildPineapple();
-const pearModel = buildPear();
-const dragonfruitModel = buildDragonfruit();
-const bananaModel = buildBanana();
-const durianModel = buildDurian();
-const watermelonModel = buildWatermelon();
-const starfruitModel = buildStarfruit();
+const FRUIT_FILES = ['pineapple', 'pear', 'dragonfruit', 'banana', 'durian', 'watermelon', 'starfruit'];
+const allModelsList = await Promise.all(
+  FRUIT_FILES.map(async name => {
+    const text = await fetch(`models/${name}.scad`).then(r => r.text());
+    return buildFruitFromParams(parseScadParams(text));
+  })
+);
 
-const allModelsList = [pineappleModel, pearModel, dragonfruitModel, bananaModel, durianModel, watermelonModel, starfruitModel];
 for (const mdl of allModelsList) {
   scene.add(mdl.group);
   mdl.group.visible = false;
 }
-pineappleModel.group.visible = true;
+allModelsList[0].group.visible = true;
 
 const allModels = {};
 const modelBtnIds = {};
@@ -986,7 +751,7 @@ for (const mdl of allModelsList) {
   allModels[mdl.name] = mdl;
   modelBtnIds[mdl.name] = 'btn' + mdl.name.charAt(0).toUpperCase() + mdl.name.slice(1);
 }
-let activeModel = pineappleModel;
+let activeModel = allModelsList[0];
 
 function switchModel(model) {
   activeModel.group.visible = false;
@@ -1253,15 +1018,16 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   scad += `    ]\n  );\n\n`;
 
   // Watermelon rind (extra body part)
-  if (m.name === 'watermelon') {
+  if (m.params && m.params.has_rind) {
     const leafColor = scadColor(m.origColors.leaf.getHex());
-    scad += `  // Rind\n  color(${leafColor})\n  translate([0, 0, ${BR}])\n  linear_extrude(height = 12)\n`;
-    scad += `  difference() {\n    difference() { circle(r = ${BR + 3}, $fn = 64); circle(r = ${BR}, $fn = 64); }\n`;
-    scad += `    translate([0, -${BR + 3}, 0]) square(${(BR + 3) * 2}, center = true);\n  }\n\n`;
+    const rindTh = m.params.rind_thickness || 3;
+    scad += `  // Rind\n  color(${leafColor})\n  translate([0, 0, ${BR}])\n  linear_extrude(height = ${m.params.slice_depth || 12})\n`;
+    scad += `  difference() {\n    difference() { circle(r = ${BR + rindTh}, $fn = 64); circle(r = ${BR}, $fn = 64); }\n`;
+    scad += `    translate([0, -${BR + rindTh}, 0]) square(${(BR + rindTh) * 2}, center = true);\n  }\n\n`;
   }
 
   // Starfruit needs the star module
-  if (m.name === 'starfruit') {
+  if (m.params && m.params.body_type === 'star') {
     scad = scad.replace('$fn = 64;\n\n', '$fn = 64;\n\nmodule star(outer, inner, n) {\n  polygon([for (i = [0:2*n-1]) let(r = i % 2 == 0 ? outer : inner, a = i * 180/n) [r*cos(a), r*sin(a)]]);\n}\n\n');
   }
 
@@ -1279,7 +1045,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
     // SCAD coords: swap Y/Z
     const sp = `[${px.toFixed(3)}, ${pz.toFixed(3)}, ${py.toFixed(3)}]`;
 
-    if (m.name === 'durian') {
+    if (m.bumpType === 'cone') {
       // Conical spikes oriented outward from body center
       // Direction in SCAD coords (Z-up): dx=Three.x, dy=Three.z, dz=Three.y-BH/2
       const dx_s = px, dy_s = pz, dz_s = py - BH / 2;
@@ -1290,75 +1056,70 @@ document.getElementById('exportBtn').addEventListener('click', () => {
       // Cross product of (0,0,1) x (ndx,ndy,ndz) = (-ndy, ndx, 0)
       const cx = -ndy, cy = ndx;
       const clen = Math.sqrt(cx * cx + cy * cy);
-      const spikeH = (8 * sy).toFixed(2);
-      const spikeR = (2.5 * sx).toFixed(2);
+      const coneH = m.params ? m.params.cone_height : 8;
+      const coneR = m.params ? m.params.cone_radius : 2.5;
+      const spikeH = (coneH * sy).toFixed(2);
+      const spikeR = (coneR * sx).toFixed(2);
       if (clen > 0.001) {
         scad += `  color(${bumpColor}) translate(${sp}) rotate(a = ${angle.toFixed(1)}, v = [${(cx / clen).toFixed(4)}, ${(cy / clen).toFixed(4)}, 0]) cylinder(h = ${spikeH}, r1 = ${spikeR}, r2 = 0, $fn = 6);\n`;
       } else {
         scad += `  color(${bumpColor}) translate(${sp}) cylinder(h = ${spikeH}, r1 = ${spikeR}, r2 = 0, $fn = 6);\n`;
       }
-    } else if (m.name === 'pineapple') {
-      scad += `  color(${bumpColor}) translate(${sp}) scale([${sx.toFixed(3)}, ${sz.toFixed(3)}, ${(sy * 1.3).toFixed(3)}]) sphere(r = 3.5, $fn = 12);\n`;
-    } else if (m.name === 'watermelon') {
-      scad += `  color("Black") translate(${sp}) scale([${(sx * 0.7).toFixed(3)}, ${(sz * 0.4).toFixed(3)}, ${(sy * 1.2).toFixed(3)}]) sphere(r = 1.2, $fn = 8);\n`;
+    } else if (m.bumpType === 'seed') {
+      scad += `  color("Black") translate(${sp}) scale([${(sx * 0.7).toFixed(3)}, ${(sz * 0.4).toFixed(3)}, ${(sy * 1.2).toFixed(3)}]) sphere(r = ${m.params ? m.params.bump_size : 1.2}, $fn = 8);\n`;
     } else {
-      const bsz = m.name === 'dragonfruit' ? 1.5 : m.name === 'starfruit' ? 1.5 : 1.8;
+      // sphere bumps
+      const bsz = m.params ? m.params.bump_size : 1.8;
       scad += `  color(${bumpColor}) translate(${sp}) scale([${sx.toFixed(3)}, ${sz.toFixed(3)}, ${sy.toFixed(3)}]) sphere(r = ${bsz}, $fn = 12);\n`;
     }
   }
 
   // --- Leaves/crown: read actual rendered state ---
-  const leafColor = m.name !== 'watermelon' ? scadColor(m.origColors.leaf.getHex()) : null;
+  const leafColor = m.leaves.length > 0 ? scadColor(m.origColors.leaf.getHex()) : null;
   // Crown Z position in SCAD (swap Y→Z from Three.js crown.position.y)
   const crownZ = m.crown ? m.crown.position.y : BH - 3;
 
-  if (m.name === 'pineapple' || m.name === 'dragonfruit') {
+  if (m.leaves.length > 0 && leafColor) {
     scad += `\n  // Leaves\n`;
+
+    // Export stem if present
+    if (m.params && m.params.has_stem) {
+      const stemColor = m.params.stem_color ? scadColor(parseInt(m.params.stem_color).toString(16).padStart(6, '0').replace(/^/, '0x') | 0) : leafColor;
+      const stemR1 = m.params.stem_r1, stemR2 = m.params.stem_r2, stemH = m.params.stem_height;
+      const stemZ = m.params.stem_y || crownZ;
+      scad += `  color(${leafColor}) translate([0, 0, ${stemZ.toFixed ? stemZ.toFixed(1) : stemZ}]) cylinder(h = ${stemH}, r1 = ${stemR2}, r2 = ${stemR1}, $fn = 12);\n`;
+    }
+
     for (const lf of m.leaves) {
+      // Skip stem/nub meshes (they don't have real leaf geometry)
+      if (lf.origTiltRad === 0 && lf.angleDeg === 0) continue;
+      if (lf.angleDeg === 180 && lf.origTiltRad === 0) continue;
+
       const a = lf.angleDeg;
       // Use current mesh rotation (captures splay + melt effects)
       const tilt = (-lf.mesh.rotation.x * 180 / Math.PI);
       const lsx = lf.mesh.scale.x, lsy = lf.mesh.scale.y, lsz = lf.mesh.scale.z;
-      scad += `  color(${leafColor}) translate([0, 0, ${crownZ.toFixed(1)}])\n`;
+
+      // Position: for surface-placed leaves, include their local position
+      if (m.leafPlacement === 'surface') {
+        const lpx = lf.mesh.position.x, lpy = lf.mesh.position.y, lpz = lf.mesh.position.z;
+        scad += `  color(${leafColor}) translate([${lpx.toFixed(3)}, ${lpz.toFixed(3)}, ${(lpy + crownZ).toFixed(3)}])\n`;
+      } else {
+        scad += `  color(${leafColor}) translate([0, 0, ${crownZ.toFixed(1)}])\n`;
+      }
       scad += `  rotate([0, 0, ${a.toFixed(1)}]) rotate([${tilt.toFixed(1)}, 0, 0])\n`;
       scad += `    scale([${lsx.toFixed(3)}, ${lsz.toFixed(3)}, ${lsy.toFixed(3)}])\n`;
-      scad += `    hull() {\n      scale([4, 1, 1]) sphere(r = 1, $fn = 8);\n`;
-      scad += `      translate([0, -5, 20]) scale([1.5, 0.5, 1]) sphere(r = 1, $fn = 8);\n    }\n`;
+
+      const lw = m.params ? m.params.leaf_width : 8;
+      const ll = m.params ? m.params.leaf_length : 20;
+      scad += `    hull() {\n      scale([${(lw / 2).toFixed(1)}, 1, 1]) sphere(r = 1, $fn = 8);\n`;
+      scad += `      translate([0, -${(ll * 0.25).toFixed(1)}, ${(ll * 0.5).toFixed(1)}]) scale([${(lw / 5).toFixed(1)}, 0.5, 1]) sphere(r = 0.8, $fn = 8);\n    }\n`;
     }
-  } else if (m.name === 'pear') {
-    scad += `\n  // Leaves\n`;
-    for (const lf of m.leaves) {
-      const a = lf.angleDeg;
-      const tilt = (-lf.mesh.rotation.x * 180 / Math.PI);
-      const lsx = lf.mesh.scale.x, lsy = lf.mesh.scale.y, lsz = lf.mesh.scale.z;
-      scad += `  color(${leafColor}) translate([0, 0, ${crownZ.toFixed(1)}])\n`;
-      scad += `  rotate([0, 0, ${a.toFixed(1)}]) rotate([${tilt.toFixed(1)}, 0, 0])\n`;
-      scad += `    scale([${lsx.toFixed(3)}, ${lsz.toFixed(3)}, ${lsy.toFixed(3)}])\n`;
-      scad += `    hull() {\n      scale([2.5, 0.75, 1]) sphere(r = 1, $fn = 8);\n`;
-      scad += `      translate([0, -3, 12]) scale([1, 0.4, 1]) sphere(r = 0.8, $fn = 8);\n    }\n`;
-    }
-    scad += `\n  // Stem\n  color(${leafColor}) translate([0, 0, ${BH}]) cylinder(h = 8, r1 = 1.2, r2 = 0.8, $fn = 12);\n`;
-  } else if (m.name === 'durian') {
-    scad += `\n  // Stem\n  color([0.478, 0.420, 0.235])\n  translate([0, 0, ${(BH - 2).toFixed(1)}]) cylinder(h = 8, r1 = 5, r2 = 3, $fn = 8);\n`;
-    scad += `  // Stem leaves\n`;
-    for (const lf of m.leaves) {
-      if (lf.angleDeg === 0 && lf.origTiltRad === 0) continue; // skip stem mesh
-      const a = lf.angleDeg;
-      const tilt = (-lf.mesh.rotation.x * 180 / Math.PI);
-      const lsx = lf.mesh.scale.x, lsy = lf.mesh.scale.y, lsz = lf.mesh.scale.z;
-      scad += `  color(${leafColor}) translate([0, 0, ${(BH + 4).toFixed(1)}])\n`;
-      scad += `  rotate([0, 0, ${a.toFixed(1)}]) rotate([${tilt.toFixed(1)}, 0, 0])\n`;
-      scad += `    scale([${lsx.toFixed(3)}, ${lsz.toFixed(3)}, ${lsy.toFixed(3)}])\n`;
-      scad += `    hull() {\n      scale([2.5, 0.75, 1]) sphere(r = 0.8, $fn = 8);\n`;
-      scad += `      translate([0, -3, 8]) scale([1, 0.3, 1]) sphere(r = 0.5, $fn = 8);\n    }\n`;
-    }
-  } else if (m.name === 'banana') {
-    scad += `\n  // Stem\n  color(${leafColor})\n  translate([0, 0, ${BH}]) cylinder(h = 6, r1 = 2.5, r2 = 1.5, $fn = 8);\n`;
-  } else if (m.name === 'starfruit') {
-    scad += `\n  // Stem\n  color(${leafColor})\n  translate([0, 0, ${(BH - 2).toFixed(1)}]) cylinder(h = 5, r1 = 1.5, r2 = 0.8, $fn = 8);\n`;
   }
 
-  scad += `}\n\n// Base\ncylinder(h = 2, r1 = 12, r2 = 10, $fn = 32);\n`;
+  const baseR1 = m.params ? m.params.base_r1 : 10;
+  const baseR2 = m.params ? m.params.base_r2 : 12;
+  scad += `}\n\n// Base\ncylinder(h = 2, r1 = ${baseR2}, r2 = ${baseR1}, $fn = 32);\n`;
 
   const blob = new Blob([scad], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
